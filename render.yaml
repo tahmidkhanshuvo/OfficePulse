@@ -48,13 +48,15 @@ services:
         sync: false
       - key: DISCORD_ALERT_CHANNEL_ID
         sync: false
+      - key: DISCORD_COMMAND_CHANNEL_ID
+        sync: false
       - key: DISCORD_ALLOWED_CONTROL_USER_IDS
         sync: false
       - key: AI_PROVIDER
-        value: openai
-      - key: OPENAI_API_KEY
+        value: groq
+      - key: AI_API_KEY
         sync: false
-      - key: OPENAI_MODEL
+      - key: AI_MODEL
         sync: false
       - key: AI_MAX_TOOL_ROUNDS
         value: 6
@@ -102,4 +104,3 @@ services:
         value: false
       - key: FEATURE_DEMO_CONTROLS
         value: true
-

@@ -22,6 +22,11 @@ export interface AppConfig {
   pirRecentSeconds: number;
   pirVacantSeconds: number;
   telemetryStaleSeconds: number;
+  aiProvider: string;
+  aiApiKey: string;
+  aiModel: string;
+  aiMaxToolRounds: number;
+  aiConversationTtlDays: number;
 }
 
 function numberFromEnv(name: string, fallback: number): number {
@@ -66,6 +71,11 @@ export function loadConfig(): AppConfig {
     officeCloseTime: stringFromEnv("OFFICE_CLOSE_TIME", "17:00"),
     pirRecentSeconds: numberFromEnv("PIR_RECENT_SECONDS", 120),
     pirVacantSeconds: numberFromEnv("PIR_VACANT_SECONDS", 900),
-    telemetryStaleSeconds: numberFromEnv("TELEMETRY_STALE_SECONDS", 90)
+    telemetryStaleSeconds: numberFromEnv("TELEMETRY_STALE_SECONDS", 90),
+    aiProvider: stringFromEnv("AI_PROVIDER", "groq"),
+    aiApiKey: stringFromEnv("AI_API_KEY"),
+    aiModel: stringFromEnv("AI_MODEL"),
+    aiMaxToolRounds: numberFromEnv("AI_MAX_TOOL_ROUNDS", 6),
+    aiConversationTtlDays: numberFromEnv("AI_CONVERSATION_TTL_DAYS", 30)
   };
 }

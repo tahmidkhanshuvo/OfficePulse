@@ -23,7 +23,9 @@ OfficePulse deploys to Render as a Docker-backed web service using `render.yaml`
 Optional integration values:
 
 - Discord variables
-- OpenAI variables
+- AI provider variables
+
+Set `DISCORD_ALLOWED_CONTROL_USER_IDS=*` only for demos where every Discord user in the bot context may trigger protected control proposals. Use a comma-separated allowlist for safer deployments.
 
 ## Production PIN Hash
 
@@ -48,4 +50,3 @@ Run migrations locally or from a one-off Render shell:
 ```bash
 bun run db:migrate
 ```
-

@@ -614,10 +614,14 @@ async function route(context: RequestContext): Promise<Response> {
   }
 
   if (method === "GET" && path === "/api/v1/integrations/discord") {
+    const allowedControlUsers = Bun.env.DISCORD_ALLOWED_CONTROL_USER_IDS ?? "";
     return json(context, {
       configured: Boolean(Bun.env.DISCORD_APPLICATION_ID && Bun.env.DISCORD_BOT_TOKEN),
       guildId: Bun.env.DISCORD_GUILD_ID ?? null,
-      alertChannelId: Bun.env.DISCORD_ALERT_CHANNEL_ID ?? null
+      alertChannelId: Bun.env.DISCORD_ALERT_CHANNEL_ID ?? null,
+      commandChannelId: Bun.env.DISCORD_COMMAND_CHANNEL_ID || null,
+      commandScope: Bun.env.DISCORD_COMMAND_CHANNEL_ID ? "single_channel" : "all_channels",
+      controlAccess: allowedControlUsers === "*" ? "all_users" : "allowlist"
     });
   }
 
