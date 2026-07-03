@@ -1,0 +1,105 @@
+services:
+  - type: web
+    name: officepulse-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: APP_ENV
+        value: production
+      - key: APP_TIMEZONE
+        value: Asia/Dhaka
+      - key: API_PORT
+        value: 10000
+      - key: PUBLIC_API_URL
+        sync: false
+      - key: PUBLIC_WS_URL
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_DIRECT_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: REDIS_PREFIX
+        value: officepulse
+      - key: PLATFORM_PIN_HASH
+        sync: false
+      - key: PLATFORM_SESSION_TTL_SECONDS
+        value: 28800
+      - key: PLATFORM_IDLE_TIMEOUT_SECONDS
+        value: 1800
+      - key: CONTROL_REAUTH_TTL_SECONDS
+        value: 300
+      - key: SESSION_COOKIE_SECRET
+        sync: false
+      - key: DISCORD_APPLICATION_ID
+        sync: false
+      - key: DISCORD_PUBLIC_KEY
+        sync: false
+      - key: DISCORD_BOT_TOKEN
+        sync: false
+      - key: DISCORD_GUILD_ID
+        sync: false
+      - key: DISCORD_ALERT_CHANNEL_ID
+        sync: false
+      - key: DISCORD_ALLOWED_CONTROL_USER_IDS
+        sync: false
+      - key: AI_PROVIDER
+        value: openai
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        sync: false
+      - key: AI_MAX_TOOL_ROUNDS
+        value: 6
+      - key: AI_CONVERSATION_TTL_DAYS
+        value: 30
+      - key: DEFAULT_TARIFF_PER_KWH
+        value: 12
+      - key: CURRENCY
+        value: BDT
+      - key: CARBON_KG_PER_KWH
+        value: 0.62
+      - key: OFFICE_OPEN_TIME
+        value: 09:00
+      - key: OFFICE_CLOSE_TIME
+        value: 17:00
+      - key: PIR_RECENT_SECONDS
+        value: 120
+      - key: PIR_VACANT_SECONDS
+        value: 900
+      - key: SHUTDOWN_WARNING_SECONDS
+        value: 120
+      - key: TELEMETRY_STALE_SECONDS
+        value: 90
+      - key: INTERNAL_SERVICE_TOKEN
+        sync: false
+      - key: TELEMETRY_HMAC_SECRET
+        sync: false
+      - key: SIMULATOR_TIME_SCALE
+        value: 1
+      - key: FEATURE_AI_CHAT
+        value: true
+      - key: FEATURE_AUTO_SHUTDOWN
+        value: true
+      - key: FEATURE_PUBLIC_DISPLAY
+        value: true
+      - key: FEATURE_REPORTS
+        value: true
+      - key: FEATURE_PWA
+        value: false
+      - key: FEATURE_CARBON
+        value: true
+      - key: FEATURE_BILL_FORECAST
+        value: true
+      - key: FEATURE_LOCAL_GATEWAY
+        value: false
+      - key: FEATURE_DEMO_CONTROLS
+        value: true
+

@@ -6,6 +6,9 @@ export interface AppConfig {
   publicApiUrl: string;
   publicWsUrl: string;
   corsOrigins: string[];
+  databaseUrl: string;
+  databaseDirectUrl: string;
+  redisUrl: string;
   platformPinHash: string;
   platformSessionTtlSeconds: number;
   platformIdleTimeoutSeconds: number;
@@ -48,6 +51,9 @@ export function loadConfig(): AppConfig {
       .split(",")
       .map((origin) => origin.trim())
       .filter(Boolean),
+    databaseUrl: stringFromEnv("DATABASE_URL"),
+    databaseDirectUrl: stringFromEnv("DATABASE_DIRECT_URL"),
+    redisUrl: stringFromEnv("REDIS_URL"),
     platformPinHash: stringFromEnv("PLATFORM_PIN_HASH"),
     platformSessionTtlSeconds: numberFromEnv("PLATFORM_SESSION_TTL_SECONDS", 28800),
     platformIdleTimeoutSeconds: numberFromEnv("PLATFORM_IDLE_TIMEOUT_SECONDS", 1800),

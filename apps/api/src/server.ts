@@ -9,8 +9,9 @@ import {
 } from "../../../packages/auth/src";
 import { loadConfig } from "../../../packages/config/src";
 import type { ApiEnvelope, ApiErrorEnvelope } from "../../../packages/contracts/src";
-import { buildOfficeSnapshot, InMemoryOfficeRepository } from "../../../packages/domain/src";
+import { buildOfficeSnapshot, buildUsageRankings, InMemoryOfficeRepository } from "../../../packages/domain/src";
 import { createLogger } from "../../../packages/logger/src";
+import { checkRedisHealth } from "../../../packages/redis/src";
 
 const config = loadConfig();
 const logger = createLogger("api");
@@ -140,13 +141,14 @@ async function route(context: RequestContext): Promise<Response> {
   }
 
   if (method === "GET" && path === "/ready") {
+    const redis = await checkRedisHealth(config.redisUrl);
     return json(context, {
       status: "ready",
       checks: {
         api: "ok",
         config: "ok",
-        database: "not_configured_in_memory_mode",
-        redis: "not_configured_in_memory_mode"
+        database: config.databaseUrl ? "configured" : "not_configured_in_memory_mode",
+        redis: redis.status
       }
     });
   }
@@ -272,17 +274,87 @@ async function route(context: RequestContext): Promise<Response> {
   }
 
   if (method === "GET" && path === "/api/v1/system/components") {
+    const redis = await checkRedisHealth(config.redisUrl);
     return json(context, {
       components: [
         { id: "api", status: "healthy", lastSeenAt: new Date().toISOString() },
-        { id: "database", status: "in_memory_mode", lastSeenAt: new Date().toISOString() },
-        { id: "redis", status: "in_memory_mode", lastSeenAt: new Date().toISOString() }
+        { id: "database", status: config.databaseUrl ? "configured" : "in_memory_mode", lastSeenAt: new Date().toISOString() },
+        { id: "redis", status: redis.status, lastSeenAt: new Date().toISOString() }
       ]
     });
   }
 
   if (method === "GET" && path === "/api/v1/rooms") {
     return json(context, { rooms: snapshot(context).rooms });
+  }
+
+  const roomSnapshotMatch = path.match(/^\/api\/v1\/rooms\/([^/]+)\/snapshot$/);
+  if (method === "GET" && roomSnapshotMatch) {
+    const room = snapshot(context).rooms.find((candidate) => candidate.room.slug === roomSnapshotMatch[1]);
+    if (!room) return error(context, 404, "ROOM_NOT_FOUND", "Room not found.", { roomId: roomSnapshotMatch[1] });
+    return json(context, {
+      roomId: room.room.slug,
+      powerWatts: room.powerWatts,
+      activeDeviceCount: room.activeDeviceCount,
+      occupancy: room.occupancy,
+      alerts: room.alerts
+    });
+  }
+
+  const roomDevicesMatch = path.match(/^\/api\/v1\/rooms\/([^/]+)\/devices$/);
+  if (method === "GET" && roomDevicesMatch) {
+    const room = snapshot(context).rooms.find((candidate) => candidate.room.slug === roomDevicesMatch[1]);
+    if (!room) return error(context, 404, "ROOM_NOT_FOUND", "Room not found.", { roomId: roomDevicesMatch[1] });
+    return json(context, { devices: room.devices });
+  }
+
+  const roomActivityMatch = path.match(/^\/api\/v1\/rooms\/([^/]+)\/activity$/);
+  if (method === "GET" && roomActivityMatch) {
+    return json(context, {
+      items: office.getActivity().filter((item) => item.roomId === roomActivityMatch[1]),
+      nextCursor: null
+    });
+  }
+
+  const roomEfficiencyMatch = path.match(/^\/api\/v1\/rooms\/([^/]+)\/efficiency$/);
+  if (method === "GET" && roomEfficiencyMatch) {
+    const room = snapshot(context).rooms.find((candidate) => candidate.room.slug === roomEfficiencyMatch[1]);
+    if (!room) return error(context, 404, "ROOM_NOT_FOUND", "Room not found.", { roomId: roomEfficiencyMatch[1] });
+    const wastePenalty = room.alerts.length * 10;
+    return json(context, {
+      roomId: room.room.slug,
+      score: Math.max(0, 100 - wastePenalty - room.powerWatts / 10),
+      factors: {
+        activeAlerts: room.alerts.length,
+        currentPowerWatts: room.powerWatts,
+        occupancyState: room.occupancy.state
+      }
+    });
+  }
+
+  const roomChecklistMatch = path.match(/^\/api\/v1\/rooms\/([^/]+)\/closing-checklist$/);
+  if (method === "GET" && roomChecklistMatch) {
+    const room = snapshot(context).rooms.find((candidate) => candidate.room.slug === roomChecklistMatch[1]);
+    if (!room) return error(context, 404, "ROOM_NOT_FOUND", "Room not found.", { roomId: roomChecklistMatch[1] });
+    return json(context, {
+      roomId: room.room.slug,
+      devicesOn: room.devices.filter((device) => device.state.status === "on"),
+      alerts: room.alerts,
+      readyToClose: room.activeDeviceCount === 0 && room.alerts.length === 0
+    });
+  }
+
+  if (method === "GET" && path === "/api/v1/office/closing-checklist") {
+    const current = snapshot(context);
+    return json(context, {
+      rooms: current.rooms.map((room) => ({
+        roomId: room.room.slug,
+        devicesOn: room.devices.filter((device) => device.state.status === "on").length,
+        alerts: room.alerts.length,
+        readyToClose: room.activeDeviceCount === 0 && room.alerts.length === 0
+      })),
+      readyToClose: current.devices.every((device) => device.state.status !== "on") && current.alerts.length === 0
+    });
   }
 
   const roomMatch = path.match(/^\/api\/v1\/rooms\/([^/]+)$/);
@@ -301,6 +373,39 @@ async function route(context: RequestContext): Promise<Response> {
     const device = snapshot(context).devices.find((candidate) => candidate.id === deviceMatch[1]);
     if (!device) return error(context, 404, "DEVICE_NOT_FOUND", "Device not found.", { deviceId: deviceMatch[1] });
     return json(context, device);
+  }
+
+  const deviceUsageMatch = path.match(/^\/api\/v1\/devices\/([^/]+)\/usage$/);
+  if (method === "GET" && deviceUsageMatch) {
+    const device = snapshot(context).devices.find((candidate) => candidate.id === deviceUsageMatch[1]);
+    if (!device) return error(context, 404, "DEVICE_NOT_FOUND", "Device not found.", { deviceId: deviceUsageMatch[1] });
+    const todayKwh = Number(((device.state.powerWatts * 8) / 1000).toFixed(3));
+    return json(context, {
+      deviceId: device.id,
+      powerWatts: device.state.powerWatts,
+      todayKwh,
+      estimatedCostToday: Number((todayKwh * config.defaultTariffPerKwh).toFixed(2))
+    });
+  }
+
+  const deviceHistoryMatch = path.match(/^\/api\/v1\/devices\/([^/]+)\/history$/);
+  if (method === "GET" && deviceHistoryMatch) {
+    return json(context, {
+      items: office.getActivity().filter((item) => item.deviceId === deviceHistoryMatch[1]),
+      nextCursor: null
+    });
+  }
+
+  const deviceMaintenanceMatch = path.match(/^\/api\/v1\/devices\/([^/]+)\/maintenance$/);
+  if (method === "GET" && deviceMaintenanceMatch) {
+    const device = snapshot(context).devices.find((candidate) => candidate.id === deviceMaintenanceMatch[1]);
+    if (!device) return error(context, 404, "DEVICE_NOT_FOUND", "Device not found.", { deviceId: deviceMaintenanceMatch[1] });
+    return json(context, {
+      deviceId: device.id,
+      status: "ok",
+      runtimeHours: device.state.status === "on" ? 8 : 0,
+      recommendations: device.state.powerWatts > device.ratedWatts * 1.25 ? ["Inspect abnormal wattage."] : []
+    });
   }
 
   const commandMatch = path.match(/^\/api\/v1\/devices\/([^/]+)\/commands$/);
@@ -327,8 +432,36 @@ async function route(context: RequestContext): Promise<Response> {
     );
   }
 
+  const roomShutdownMatch = path.match(/^\/api\/v1\/rooms\/([^/]+)\/commands\/shutdown$/);
+  if (method === "POST" && roomShutdownMatch) {
+    const controlError = requireControl(context);
+    if (controlError) return controlError;
+    const command = office.shutdownRoom(roomShutdownMatch[1] as never, "Room shutdown requested", "dashboard");
+    if (!command) return error(context, 404, "ROOM_NOT_FOUND", "Room not found.", { roomId: roomShutdownMatch[1] });
+    return json(context, command, { status: 202 });
+  }
+
+  if (method === "POST" && path === "/api/v1/office/commands/shutdown") {
+    const controlError = requireControl(context);
+    if (controlError) return controlError;
+    return json(context, office.shutdownOffice("Office shutdown requested", "dashboard"), { status: 202 });
+  }
+
+  if (method === "POST" && path === "/api/v1/office/commands/emergency-shutdown") {
+    const controlError = requireControl(context);
+    if (controlError) return controlError;
+    return json(context, office.shutdownOffice("Emergency shutdown requested", "dashboard"), { status: 202 });
+  }
+
   if (method === "GET" && path === "/api/v1/occupancy") {
     return json(context, { occupancy: snapshot(context).occupancy });
+  }
+
+  const roomOccupancyMatch = path.match(/^\/api\/v1\/rooms\/([^/]+)\/occupancy$/);
+  if (method === "GET" && roomOccupancyMatch) {
+    const occupancy = snapshot(context).occupancy.find((item) => item.roomId === roomOccupancyMatch[1]);
+    if (!occupancy) return error(context, 404, "ROOM_NOT_FOUND", "Room not found.", { roomId: roomOccupancyMatch[1] });
+    return json(context, occupancy);
   }
 
   if (method === "GET" && path === "/api/v1/energy/live") {
@@ -347,22 +480,197 @@ async function route(context: RequestContext): Promise<Response> {
     return json(context, snapshot(context).energy);
   }
 
+  if (method === "GET" && path === "/api/v1/energy/rankings") {
+    return json(context, buildUsageRankings(office));
+  }
+
+  if (method === "GET" && path === "/api/v1/energy/history") {
+    const current = snapshot(context);
+    return json(context, {
+      granularity: "hour",
+      points: [
+        {
+          recordedAt: current.generatedAt,
+          powerWatts: current.energy.totalPowerWatts,
+          estimatedKwh: current.energy.todayKwh
+        }
+      ]
+    });
+  }
+
+  if (method === "GET" && path === "/api/v1/energy/savings") {
+    return json(context, { estimatedKwhSaved: 0, estimatedCostSaved: 0, evidence: "No completed automation savings yet." });
+  }
+
+  if (method === "GET" && path === "/api/v1/energy/carbon") {
+    const energy = snapshot(context).energy;
+    return json(context, {
+      energyKwh: energy.todayKwh,
+      kgCo2e: Number((energy.todayKwh * config.carbonKgPerKwh).toFixed(3)),
+      factor: config.carbonKgPerKwh
+    });
+  }
+
+  if (method === "GET" && path === "/api/v1/energy/forecast/bill") {
+    const energy = snapshot(context).energy;
+    return json(context, {
+      monthEndCost: Number((energy.estimatedCostToday * 30).toFixed(2)),
+      currency: config.currency,
+      confidence: "demo-estimate"
+    });
+  }
+
   if (method === "GET" && path === "/api/v1/alerts") {
     return json(context, { alerts: office.getAlerts() });
   }
 
+  if (method === "GET" && path === "/api/v1/alerts/summary") {
+    const alerts = office.getAlerts();
+    return json(context, {
+      active: alerts.filter((alert) => alert.status === "active").length,
+      warning: alerts.filter((alert) => alert.severity === "warning").length,
+      critical: alerts.filter((alert) => alert.severity === "critical").length
+    });
+  }
+
+  const alertActionMatch = path.match(/^\/api\/v1\/alerts\/([^/]+)\/(acknowledge|resolve|snooze|mute)$/);
+  if (method === "POST" && alertActionMatch) {
+    const controlError = requireControl(context);
+    if (controlError) return controlError;
+    const status = alertActionMatch[2] === "resolve" ? "resolved" : alertActionMatch[2] === "snooze" ? "snoozed" : "acknowledged";
+    const alert = office.updateAlertStatus(alertActionMatch[1], status);
+    if (!alert) return error(context, 404, "ALERT_NOT_FOUND", "Alert not found.", { alertId: alertActionMatch[1] });
+    return json(context, alert);
+  }
+
+  if (method === "GET" && path === "/api/v1/alert-rules") {
+    return json(context, {
+      rules: [
+        { id: "after_hours_device_on", enabled: true, severity: "warning" },
+        { id: "all_room_devices_on_long", enabled: true, severity: "warning" },
+        { id: "vacant_room_devices_on", enabled: true, severity: "warning" }
+      ]
+    });
+  }
+
   if (method === "GET" && path === "/api/v1/activity") {
     return json(context, {
-      items: [
-        {
-          id: "activity_seed_boot",
-          type: "system.started",
-          message: "OfficePulse in-memory backend started.",
-          occurredAt: new Date().toISOString()
-        }
-      ],
+      items: office.getActivity(),
       nextCursor: null
     });
+  }
+
+  if (method === "POST" && path === "/api/v1/reports") {
+    const controlError = requireControl(context);
+    if (controlError) return controlError;
+    const body = await readJson(request);
+    const format = body.format === "pdf" ? "pdf" : "csv";
+    return json(context, office.createReport(format), { status: 202 });
+  }
+
+  if (method === "GET" && path === "/api/v1/reports") {
+    return json(context, { reports: office.getReports() });
+  }
+
+  const reportMatch = path.match(/^\/api\/v1\/reports\/([^/]+)$/);
+  if (method === "GET" && reportMatch) {
+    const report = office.getReports().find((item) => item.id === reportMatch[1]);
+    if (!report) return error(context, 404, "REPORT_NOT_FOUND", "Report not found.", { reportId: reportMatch[1] });
+    return json(context, report);
+  }
+
+  if (method === "POST" && path === "/api/v1/ai/conversations") {
+    return json(context, {
+      conversationId: `conv_${crypto.randomUUID()}`,
+      title: "OfficePulse conversation",
+      createdAt: new Date().toISOString()
+    });
+  }
+
+  const aiMessageMatch = path.match(/^\/api\/v1\/ai\/conversations\/([^/]+)\/messages$/);
+  if (method === "POST" && aiMessageMatch) {
+    const body = await readJson(request);
+    const message = typeof body.message === "string" ? body.message : "";
+    const current = snapshot(context);
+    const answer = `Current office load is ${current.energy.totalPowerWatts} W across ${current.devices.filter((device) => device.state.status === "on").length} active devices.`;
+    return json(context, {
+      conversationId: aiMessageMatch[1],
+      answer,
+      toolTrace: [{ tool: "get_office_snapshot", success: true }],
+      message
+    });
+  }
+
+  const aiActionMatch = path.match(/^\/api\/v1\/ai\/actions\/([^/]+)\/(confirm|cancel)$/);
+  if (method === "POST" && aiActionMatch) {
+    const status = aiActionMatch[2] === "confirm" ? "confirmed" : "cancelled";
+    if (status === "confirmed") {
+      const controlError = requireControl(context);
+      if (controlError) return controlError;
+    }
+    const action = office.updateAiAction(aiActionMatch[1], status);
+    if (!action) return error(context, 404, "AI_ACTION_NOT_FOUND", "AI action not found.", { actionId: aiActionMatch[1] });
+    return json(context, action);
+  }
+
+  if (method === "GET" && path === "/api/v1/integrations/discord") {
+    return json(context, {
+      configured: Boolean(Bun.env.DISCORD_APPLICATION_ID && Bun.env.DISCORD_BOT_TOKEN),
+      guildId: Bun.env.DISCORD_GUILD_ID ?? null,
+      alertChannelId: Bun.env.DISCORD_ALERT_CHANNEL_ID ?? null
+    });
+  }
+
+  if (method === "GET" && path === "/api/v1/simulator/status") {
+    return json(context, { activeScenario: null, timeScale: Number(Bun.env.SIMULATOR_TIME_SCALE ?? 1), clock: new Date().toISOString() });
+  }
+
+  if (method === "GET" && path === "/api/v1/simulator/scenarios") {
+    return json(context, {
+      scenarios: [
+        "normal-day",
+        "lunch-break",
+        "after-hours-waste",
+        "all-on-two-hours",
+        "peak-load",
+        "abnormal-fan",
+        "rapid-switching",
+        "pir-silent",
+        "gateway-offline",
+        "closing-demo",
+        "energy-saving",
+        "all-off"
+      ]
+    });
+  }
+
+  if (method === "POST" && path === "/internal/v1/telemetry/devices") {
+    const body = await readJson(request);
+    const events = Array.isArray(body.events) ? body.events : [];
+    const updated = office.ingestDeviceTelemetry(
+      events
+        .filter((event): event is Record<string, unknown> => Boolean(event) && typeof event === "object")
+        .map((event) => ({
+          deviceId: String(event.deviceId ?? ""),
+          status: event.status === "off" ? "off" : event.status === "unknown" ? "unknown" : "on",
+          powerWatts: typeof event.powerWatts === "number" ? event.powerWatts : undefined,
+          observedAt: typeof event.observedAt === "string" ? event.observedAt : undefined,
+          source: "simulator"
+        }))
+    );
+    return json(context, { updated });
+  }
+
+  if (method === "POST" && path === "/internal/v1/telemetry/occupancy") {
+    const body = await readJson(request);
+    const occupancy = office.ingestOccupancyTelemetry({
+      roomId: String(body.roomId ?? "drawing") as never,
+      motionDetected: body.motionDetected === true,
+      observedAt: typeof body.observedAt === "string" ? body.observedAt : undefined,
+      source: "simulator"
+    });
+    if (!occupancy) return error(context, 404, "ROOM_NOT_FOUND", "Room not found.", { roomId: body.roomId });
+    return json(context, occupancy);
   }
 
   if (method === "GET" && path === "/api/v1/settings") {
@@ -381,6 +689,7 @@ async function route(context: RequestContext): Promise<Response> {
 
 const server = Bun.serve<{ sessionId: string }>({
   port: config.apiPort,
+  hostname: "0.0.0.0",
   async fetch(request, server) {
     const context = makeContext(request);
 

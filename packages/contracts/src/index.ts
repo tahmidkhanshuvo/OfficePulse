@@ -68,6 +68,46 @@ export interface Alert {
   updatedAt: string;
 }
 
+export interface ActivityItem {
+  id: string;
+  type: string;
+  message: string;
+  roomId?: RoomSlug;
+  deviceId?: string;
+  occurredAt: string;
+  context?: Record<string, unknown>;
+}
+
+export interface DeviceCommand {
+  id: string;
+  target: { type: "device" | "room" | "office"; id: string };
+  action: "on" | "off" | "shutdown";
+  status: CommandStatus;
+  reason: string;
+  actor: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ReportRequest {
+  id: string;
+  format: "csv" | "pdf";
+  status: "queued" | "completed";
+  requestedAt: string;
+  completedAt: string | null;
+  downloadUrl: string | null;
+}
+
+export interface AiAction {
+  id: string;
+  tool: string;
+  status: "awaiting_confirmation" | "confirmed" | "cancelled" | "expired";
+  arguments: Record<string, unknown>;
+  confirmationText: string;
+  expiresAt: string;
+  createdAt: string;
+}
+
 export interface RoomSummary {
   room: Room;
   devices: Array<Device & { state: DeviceState }>;
