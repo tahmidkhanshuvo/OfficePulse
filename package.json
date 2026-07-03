@@ -23,8 +23,8 @@
     "openapi:generate": "bun scripts/generate-openapi.ts"
   },
   "devDependencies": {
+    "@types/bun": "latest",
     "@biomejs/biome": "latest",
     "typescript": "latest"
   }
 }
-
