@@ -1,0 +1,2 @@
+-- OfficePulse schema entrypoint.
+

@@ -1,0 +1,46 @@
+openapi: 3.1.0
+info:
+  title: OfficePulse API
+  version: 0.1.0
+paths:
+  /api/v1/auth/pin/verify:
+    post:
+      summary: Verify the 6-digit platform PIN and create a dashboard session.
+      responses:
+        "200":
+          description: Platform session created.
+  /api/v1/auth/session:
+    get:
+      summary: Check the current platform session.
+      responses:
+        "200":
+          description: Current session state.
+    delete:
+      summary: Revoke the current platform session.
+      responses:
+        "204":
+          description: Session revoked.
+  /api/v1/auth/session/refresh:
+    post:
+      summary: Refresh an active platform session.
+      responses:
+        "200":
+          description: Session refreshed.
+  /api/v1/control-auth/verify:
+    post:
+      summary: Re-verify the platform PIN for recent sensitive control authorization.
+      responses:
+        "200":
+          description: Recent control authorization granted.
+  /api/v1/control-auth/refresh:
+    post:
+      summary: Refresh recent control authorization.
+      responses:
+        "200":
+          description: Recent control authorization refreshed.
+  /api/v1/control-auth/session:
+    delete:
+      summary: End recent control authorization without logging out.
+      responses:
+        "204":
+          description: Recent control authorization ended.

@@ -1,0 +1,7 @@
+{
+  "name": "@officepulse/redis",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts"
+}
+

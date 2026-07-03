@@ -1,0 +1,7 @@
+{
+  "name": "@officepulse/logger",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts"
+}
+

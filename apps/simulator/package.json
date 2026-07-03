@@ -1,0 +1,10 @@
+{
+  "name": "@officepulse/simulator",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch src/cli.ts",
+    "build": "bun build src/cli.ts --outdir dist --target bun"
+  }
+}
+

@@ -1,0 +1,10 @@
+{
+  "name": "@officepulse/worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch src/worker.ts",
+    "build": "bun build src/worker.ts --outdir dist --target bun"
+  }
+}
+

@@ -1,0 +1,10 @@
+{
+  "name": "@officepulse/api",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch src/server.ts",
+    "build": "bun build src/server.ts --outdir dist --target bun"
+  }
+}
+

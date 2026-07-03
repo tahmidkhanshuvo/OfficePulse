@@ -1,0 +1,7 @@
+{
+  "name": "@officepulse/db",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts"
+}
+

@@ -1,0 +1,10 @@
+{
+  "name": "@officepulse/discord-bot",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch src/bot.ts",
+    "build": "bun build src/bot.ts --outdir dist --target bun"
+  }
+}
+

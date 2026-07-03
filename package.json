@@ -1,0 +1,30 @@
+{
+  "name": "officepulse",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "bun scripts/dev-all.ts",
+    "dev:api": "bun --watch apps/api/src/server.ts",
+    "dev:dashboard": "bun --cwd apps/dashboard run dev",
+    "dev:worker": "bun --watch apps/worker/src/worker.ts",
+    "dev:bot": "bun --watch apps/discord-bot/src/bot.ts",
+    "simulate": "bun apps/simulator/src/cli.ts",
+    "db:migrate": "bun scripts/migrate.ts",
+    "db:seed": "bun scripts/seed.ts",
+    "test": "bun test",
+    "test:e2e": "bun test tests/e2e",
+    "typecheck": "bunx tsc --noEmit",
+    "lint": "bunx biome check .",
+    "build": "bun run --filter '*' build",
+    "discord:register": "bun scripts/register-discord-commands.ts",
+    "openapi:generate": "bun scripts/generate-openapi.ts"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "latest",
+    "typescript": "latest"
+  }
+}
+
