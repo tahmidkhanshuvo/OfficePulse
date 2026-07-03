@@ -5,6 +5,8 @@
     "apps/worker/**/*.ts",
     "apps/simulator/**/*.ts",
     "apps/discord-bot/**/*.ts",
+    "apps/dashboard/**/*.ts",
+    "apps/dashboard/**/*.tsx",
     "packages/**/*.ts",
     "packages/**/*.tsx",
     "scripts/**/*.ts",
