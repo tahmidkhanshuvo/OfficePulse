@@ -138,13 +138,10 @@ export function AdminLogin() {
                 arrow_forward
               </span>
             </button>
-            <div className="flex justify-between items-center font-body-sm text-body-sm text-text-secondary">
-              <a className="hover:text-primary transition-colors" href="#">
-                Forgot Credentials?
-              </a>
+            <div className="flex justify-center items-center font-body-sm text-body-sm text-text-secondary">
               <a
                 className="hover:text-primary transition-colors flex items-center gap-1"
-                href="#"
+                href="#/support"
               >
                 <span className="material-symbols-outlined text-[14px]">
                   help
@@ -164,19 +161,19 @@ export function AdminLogin() {
         <nav className="flex gap-4 mt-2 md:mt-0 font-label-caps text-label-caps text-text-secondary">
           <a
             className="hover:text-primary transition-colors duration-200 opacity-80 hover:opacity-100"
-            href="#"
+            href="#/privacy"
           >
             Privacy Policy
           </a>
           <a
             className="hover:text-primary transition-colors duration-200 opacity-80 hover:opacity-100"
-            href="#"
+            href="#/terms"
           >
             Terms of Service
           </a>
           <a
             className="hover:text-primary transition-colors duration-200 opacity-80 hover:opacity-100"
-            href="#"
+            href="#/contact"
           >
             Contact Support
           </a>
