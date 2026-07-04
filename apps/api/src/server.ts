@@ -114,88 +114,13 @@ function error(
   });
 }
 
-function fileResponse(
-  context: RequestContext,
-  body: BodyInit,
-  contentType: string,
-  filename: string
-): Response {
+function fileResponse(context: RequestContext, body: string, contentType: string, filename: string): Response {
   return new Response(body, {
     headers: withCors(context.request, {
       "content-type": contentType,
       "content-disposition": `attachment; filename="${filename}"`
     })
   });
-}
-
-function escapePdfText(value: string): string {
-  return value.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
-}
-
-function createSimplePdf(lines: string[]): ArrayBuffer {
-  const content = [
-    "BT",
-    "/F1 14 Tf",
-    "50 780 Td",
-    ...lines.flatMap((line, index) => [
-      index === 0 ? "" : "0 -22 Td",
-      `(${escapePdfText(line)}) Tj`
-    ]).filter(Boolean),
-    "ET"
-  ].join("\n");
-  const objects = [
-    "<< /Type /Catalog /Pages 2 0 R >>",
-    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
-    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
-    `<< /Length ${content.length} >>\nstream\n${content}\nendstream`
-  ];
-  let pdf = "%PDF-1.4\n";
-  const offsets = [0];
-  for (const [index, object] of objects.entries()) {
-    offsets.push(pdf.length);
-    pdf += `${index + 1} 0 obj\n${object}\nendobj\n`;
-  }
-  const xrefOffset = pdf.length;
-  pdf += `xref\n0 ${objects.length + 1}\n`;
-  pdf += "0000000000 65535 f \n";
-  for (const offset of offsets.slice(1)) {
-    pdf += `${String(offset).padStart(10, "0")} 00000 n \n`;
-  }
-  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
-  const bytes = new TextEncoder().encode(pdf);
-  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
-}
-
-function reportFile(context: RequestContext, format: "csv" | "pdf", filename: string): Response {
-  const current = snapshot(context);
-  if (format === "csv") {
-    const lines = [
-      "room_id,room_name,power_watts,active_device_count,alert_count",
-      ...current.rooms.map((room) =>
-        [
-          room.room.slug,
-          room.room.name,
-          room.powerWatts,
-          room.activeDeviceCount,
-          room.alerts.length
-        ].join(",")
-      )
-    ];
-    return fileResponse(context, `${lines.join("\n")}\n`, "text/csv; charset=utf-8", filename);
-  }
-
-  const text = [
-    "OfficePulse Report",
-    `Generated At: ${current.generatedAt}`,
-    `Total Power Watts: ${current.energy.totalPowerWatts}`,
-    `Today kWh: ${current.energy.todayKwh}`,
-    `Estimated Cost Today: ${current.energy.estimatedCostToday} ${current.energy.currency}`,
-    `Active Alerts: ${current.alerts.length}`,
-    "",
-    ...current.rooms.map((room) => `${room.room.name}: ${room.powerWatts}W, ${room.activeDeviceCount} active devices`)
-  ];
-  return fileResponse(context, createSimplePdf(text), "application/pdf", filename);
 }
 
 function snapshot(context: RequestContext) {
@@ -909,15 +834,32 @@ async function route(context: RequestContext): Promise<Response> {
 
   const reportDownloadMatch = path.match(/^\/api\/v1\/reports\/downloads\/(csv|pdf)\/latest$/);
   if (method === "GET" && reportDownloadMatch) {
-    const format = reportDownloadMatch[1] as "csv" | "pdf";
-    return reportFile(context, format, `officepulse-report.${format}`);
-  }
+    const current = snapshot(context);
+    if (reportDownloadMatch[1] === "csv") {
+      const lines = [
+        "room_id,room_name,power_watts,active_device_count,alert_count",
+        ...current.rooms.map((room) =>
+          [
+            room.room.slug,
+            room.room.name,
+            room.powerWatts,
+            room.activeDeviceCount,
+            room.alerts.length
+          ].join(",")
+        )
+      ];
+      return fileResponse(context, `${lines.join("\n")}\n`, "text/csv; charset=utf-8", "officepulse-report.csv");
+    }
 
-  const reportFileMatch = path.match(/^\/api\/v1\/reports\/([^/]+)\/download$/);
-  if (method === "GET" && reportFileMatch) {
-    const report = office.getReports().find((item) => item.id === reportFileMatch[1]);
-    if (!report) return error(context, 404, "REPORT_NOT_FOUND", "Report not found.", { reportId: reportFileMatch[1] });
-    return reportFile(context, report.format, `${report.id}.${report.format}`);
+    const text = [
+      "OfficePulse Report",
+      `Generated At: ${current.generatedAt}`,
+      `Total Power Watts: ${current.energy.totalPowerWatts}`,
+      `Today kWh: ${current.energy.todayKwh}`,
+      `Estimated Cost Today: ${current.energy.estimatedCostToday} ${current.energy.currency}`,
+      `Active Alerts: ${current.alerts.length}`
+    ].join("\n");
+    return fileResponse(context, text, "application/pdf", "officepulse-report.pdf");
   }
 
   const reportMatch = path.match(/^\/api\/v1\/reports\/([^/]+)$/);
