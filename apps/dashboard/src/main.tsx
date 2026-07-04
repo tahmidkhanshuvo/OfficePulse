@@ -5,6 +5,7 @@ import { Overview } from "./pages/Overview";
 import { DeviceAnalytics } from "./pages/DeviceAnalytics";
 import { Map } from "./pages/Map";
 import { Logs } from "./pages/Logs";
+import { Simulations } from "./pages/Simulations";
 import { Settings } from "./pages/Settings";
 import { Chatbot } from "./pages/Chatbot";
 import { Support } from "./pages/Support";
@@ -18,6 +19,7 @@ type Route =
   | "overview"
   | "map"
   | "analytics"
+  | "simulations"
   | "logs"
   | "settings"
   | "support"
@@ -30,6 +32,7 @@ function readRoute(): Route {
   const hash = window.location.hash.replace(/^#\/?/, "");
   if (hash === "analytics") return "analytics";
   if (hash === "map") return "map";
+  if (hash === "simulations") return "simulations";
   if (hash === "logs") return "logs";
   if (hash === "settings") return "settings";
   if (hash === "support") return "support";
@@ -74,6 +77,14 @@ function App() {
     return (
       <>
         <Logs onExit={exit} />
+        <Chatbot />
+      </>
+    );
+  }
+  if (route === "simulations") {
+    return (
+      <>
+        <Simulations onExit={exit} />
         <Chatbot />
       </>
     );

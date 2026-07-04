@@ -78,6 +78,7 @@ interface PersistenceOptions {
 interface HydratedState {
   deviceStates: DeviceState[];
   occupancy: OccupancySnapshot[];
+  activity: ActivityItem[];
   stateVersion: number;
 }
 
@@ -106,6 +107,16 @@ interface PersistedTelemetryRow {
   power_watts: string | number;
   source: DeviceState["source"];
   observed_at: Date | string;
+}
+
+interface PersistedActivityRow {
+  id: string;
+  type: string;
+  message: string;
+  room_id: string | null;
+  device_id: string | null;
+  context: Record<string, unknown>;
+  occurred_at: Date | string;
 }
 
 const toIso = (value: Date | string | null): string | null => {
@@ -188,6 +199,7 @@ export class OfficePersistence {
   private readonly logger?: PersistenceOptions["logger"];
   private sql: SqlClient | null = null;
   private redis: RedisClient | null = null;
+  private readonly persistedActivityIds = new Set<string>();
 
   constructor(options: PersistenceOptions) {
     this.databaseUrl = options.databaseUrl ?? "";
@@ -216,7 +228,9 @@ export class OfficePersistence {
 
   async load(): Promise<HydratedState> {
     const redisHydrated = await this.loadFromRedis();
-    if (redisHydrated) return redisHydrated;
+    if (redisHydrated) {
+      return { ...redisHydrated, activity: await this.loadActivityFromDatabase() };
+    }
     const databaseHydrated = await this.loadFromDatabase();
     if (databaseHydrated.deviceStates.length > 0 || databaseHydrated.occupancy.length > 0) {
       await this.writeCurrentStateToRedis(databaseHydrated.deviceStates, databaseHydrated.occupancy);
@@ -237,6 +251,7 @@ export class OfficePersistence {
   }
 
   async persistSnapshot(snapshot: ReturnType<typeof buildOfficeSnapshot>, activity: ActivityItem[]) {
+    await this.persistActivityToDatabase(activity);
     if (!this.redis) return;
     try {
       await this.redis.set(redisKeys.officeSnapshot, JSON.stringify(snapshot));
@@ -358,6 +373,7 @@ export class OfficePersistence {
       return {
         deviceStates,
         occupancy: occupancyStates,
+        activity: [],
         stateVersion: Math.max(1, ...deviceStates.map((state) => state.stateVersion))
       };
     } catch (cause) {
@@ -389,7 +405,7 @@ export class OfficePersistence {
   }
 
   private async loadFromDatabase(): Promise<HydratedState> {
-    if (!this.sql) return { deviceStates: [], occupancy: [], stateVersion: 1 };
+    if (!this.sql) return { deviceStates: [], occupancy: [], activity: [], stateVersion: 1 };
     const deviceRows = (await this.sql`
       SELECT device_id, status, power_watts, source, last_changed_at, last_seen_at, state_version
       FROM device_state_current
@@ -418,8 +434,35 @@ export class OfficePersistence {
     return {
       deviceStates,
       occupancy,
+      activity: await this.loadActivityFromDatabase(),
       stateVersion: Math.max(1, ...deviceStates.map((state) => state.stateVersion))
     };
+  }
+
+  private async loadActivityFromDatabase(): Promise<ActivityItem[]> {
+    if (!this.sql) return [];
+    try {
+      const rows = (await this.sql`
+        SELECT id, type, message, room_id, device_id, context, occurred_at
+        FROM activity_events
+        ORDER BY occurred_at DESC
+        LIMIT 200
+      `) as PersistedActivityRow[];
+      const activity = rows.map((row) => ({
+        id: row.id,
+        type: row.type,
+        message: row.message,
+        roomId: row.room_id ? (row.room_id as never) : undefined,
+        deviceId: row.device_id ?? undefined,
+        occurredAt: toIso(row.occurred_at) ?? new Date(0).toISOString(),
+        context: row.context ?? {}
+      }));
+      for (const item of activity) this.persistedActivityIds.add(item.id);
+      return activity;
+    } catch (cause) {
+      this.logger?.warn("Unable to read activity from database", errorContext(cause));
+      return [];
+    }
   }
 
   private async seedCore() {
@@ -584,6 +627,23 @@ export class OfficePersistence {
       `;
     } catch (cause) {
       this.logger?.warn("Unable to persist report to database", errorContext(cause));
+    }
+  }
+
+  private async persistActivityToDatabase(activity: ActivityItem[]) {
+    if (!this.sql || activity.length === 0) return;
+    try {
+      for (const item of activity) {
+        if (this.persistedActivityIds.has(item.id)) continue;
+        await this.sql`
+          INSERT INTO activity_events (id, type, message, room_id, device_id, context, occurred_at)
+          VALUES (${item.id}, ${item.type}, ${item.message}, ${item.roomId ?? null}, ${item.deviceId ?? null}, ${JSON.stringify(item.context ?? {})}::jsonb, ${item.occurredAt})
+          ON CONFLICT (id) DO NOTHING
+        `;
+        this.persistedActivityIds.add(item.id);
+      }
+    } catch (cause) {
+      this.logger?.warn("Unable to persist activity to database", errorContext(cause));
     }
   }
 

@@ -651,12 +651,34 @@ async function route(context: RequestContext): Promise<Response> {
     });
   }
 
-  const alertActionMatch = path.match(/^\/api\/v1\/alerts\/([^/]+)\/(acknowledge|resolve|snooze|mute)$/);
+  const alertActionMatch = path.match(/^\/api\/v1\/alerts\/([^/]+)\/(resolve|snooze|forget)$/);
   if (method === "POST" && alertActionMatch) {
     const controlError = requireControl(context);
     if (controlError) return controlError;
-    const status = alertActionMatch[2] === "resolve" ? "resolved" : alertActionMatch[2] === "snooze" ? "snoozed" : "acknowledged";
-    const alert = office.updateAlertStatus(alertActionMatch[1], status);
+    const alertId = alertActionMatch[1];
+    const action = alertActionMatch[2];
+    const currentAlert = office.getAlerts().find((alert) => alert.id === alertId);
+    if (!currentAlert) return error(context, 404, "ALERT_NOT_FOUND", "Alert not found.", { alertId });
+
+    if (action === "resolve") {
+      if (currentAlert.roomId) {
+        office.shutdownRoom(currentAlert.roomId, "Alert resolved from dashboard", "dashboard");
+        telemetryGenerator.syncRoom(currentAlert.roomId, "off");
+      } else if (currentAlert.deviceId) {
+        office.updateDeviceState(currentAlert.deviceId, "off", "api");
+        telemetryGenerator.syncDevice(currentAlert.deviceId, "off");
+      }
+      const alert = office.updateAlertStatus(alertId, "resolved") ?? {
+        ...currentAlert,
+        status: "resolved" as const,
+        updatedAt: new Date().toISOString()
+      };
+      return json(context, alert);
+    }
+
+    const delayMs = action === "forget" ? 60 * 60 * 1000 : 2 * 60 * 1000;
+    const suppressedUntil = new Date(Date.now() + delayMs).toISOString();
+    const alert = office.updateAlertStatus(alertId, "snoozed", { suppressedUntil });
     if (!alert) return error(context, 404, "ALERT_NOT_FOUND", "Alert not found.", { alertId: alertActionMatch[1] });
     return json(context, alert);
   }

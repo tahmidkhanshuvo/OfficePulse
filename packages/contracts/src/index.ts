@@ -66,6 +66,7 @@ export interface Alert {
   deviceId?: string;
   createdAt: string;
   updatedAt: string;
+  suppressedUntil?: string;
 }
 
 export interface ActivityItem {

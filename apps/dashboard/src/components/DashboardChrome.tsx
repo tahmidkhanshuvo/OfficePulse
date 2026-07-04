@@ -5,7 +5,7 @@ import { useOfficeSnapshot } from "../hooks/useOfficeSnapshot";
 import { getAlerts, updateAlert, withControlRetry } from "../lib/api";
 import { formatKwh, formatWatts } from "../lib/format";
 
-type Section = "overview" | "map" | "analytics" | "logs" | "settings";
+type Section = "overview" | "map" | "analytics" | "simulations" | "logs" | "settings";
 
 export type DashboardChromeProps = {
   onExit?: () => void;
@@ -32,6 +32,7 @@ const SIDEBAR_ITEMS: { id: Section; label: string; icon: string; href: string }[
   { id: "overview", label: "Dashboard Overview", icon: "dashboard", href: "#/overview" },
   { id: "map", label: "Interactive Map", icon: "map", href: "#/map" },
   { id: "analytics", label: "Device Analytics", icon: "analytics", href: "#/analytics" },
+  { id: "simulations", label: "Simulations", icon: "science", href: "#/simulations" },
 ];
 
 const FOOTER_ITEMS: { id: Section; label: string; icon: string; href: string }[] = [
@@ -81,12 +82,12 @@ export function DashboardChrome({
     };
   }, [snapshot?.realtime.stateVersion]);
 
-  const handleAlertAction = async (alertId: string, action: "acknowledge" | "resolve" | "snooze") => {
-    await withControlRetry(() => updateAlert(alertId, action));
+  const handleAlertAction = async (alertId: string, action: "resolve" | "snooze" | "forget") => {
+    const updated = await withControlRetry(() => updateAlert(alertId, action));
     setAlerts((current) =>
       current.map((alert) =>
         alert.id === alertId
-          ? { ...alert, status: action === "resolve" ? "resolved" : action === "snooze" ? "snoozed" : "acknowledged" }
+          ? { ...alert, ...updated }
           : alert,
       ),
     );
@@ -216,17 +217,17 @@ export function DashboardChrome({
                       <div className="mt-3 grid grid-cols-3 gap-2">
                         <button
                           type="button"
-                          onClick={() => handleAlertAction(alert.id, "acknowledge")}
+                          onClick={() => handleAlertAction(alert.id, "snooze")}
                           className="rounded border border-[#FF9D63]/60 px-2 py-1.5 font-label-caps text-[10px] uppercase text-[#FF9D63] hover:bg-[#FF9D63]/10"
                         >
-                          Ack
+                          Snooze
                         </button>
                         <button
                           type="button"
-                          onClick={() => handleAlertAction(alert.id, "snooze")}
+                          onClick={() => handleAlertAction(alert.id, "forget")}
                           className="rounded border border-border-subtle px-2 py-1.5 font-label-caps text-[10px] uppercase text-text-secondary hover:text-[#FF9D63]"
                         >
-                          Snooze
+                          Forget
                         </button>
                         <button
                           type="button"

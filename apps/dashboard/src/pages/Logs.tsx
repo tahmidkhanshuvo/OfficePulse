@@ -43,10 +43,8 @@ export function Logs({ onExit }: LogsProps) {
   const [filter, setFilter] = useState<(typeof FILTERS)[number]["id"]>("ALL");
   const [entries, setEntries] = useState<LogEntry[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
 
   const refresh = useCallback(() => {
-    setLoading(true);
     return getActivity()
       .then((result) => {
         setLoadError(null);
@@ -64,10 +62,9 @@ export function Logs({ onExit }: LogsProps) {
         );
       })
       .catch((cause) => {
-        setLoadError(cause instanceof Error ? cause.message : "Unable to load system activity.");
+        setLoadError(cause instanceof Error ? cause.message : "Unable to load live activity.");
         setEntries([]);
-      })
-      .finally(() => setLoading(false));
+      });
   }, []);
 
   useEffect(() => {
@@ -99,17 +96,6 @@ export function Logs({ onExit }: LogsProps) {
                 Real-time telemetry and event stream
               </p>
             </div>
-            <button
-              type="button"
-              onClick={() => refresh()}
-              disabled={loading}
-              className="inline-flex items-center gap-2 rounded-full border border-border-subtle px-3 py-1.5 font-label-caps text-label-caps uppercase text-text-secondary hover:text-[#FF9D63] hover:border-[#FF9D63]/50 disabled:opacity-50"
-            >
-              <span className={`material-symbols-outlined text-[16px] ${loading ? "spin-slow" : ""}`}>
-                refresh
-              </span>
-              Retry
-            </button>
             {/* Filter chips */}
             <div className="flex flex-wrap gap-2">
               {FILTERS.map((f) => {

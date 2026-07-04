@@ -27,7 +27,7 @@ export interface OfficeRepository {
   updateDeviceState(deviceId: string, status: "on" | "off", source: DeviceState["source"]): DeviceState | null;
   ingestDeviceTelemetry(events: DeviceTelemetryInput[]): DeviceState[];
   ingestOccupancyTelemetry(event: OccupancyTelemetryInput): OccupancySnapshot | null;
-  updateAlertStatus(alertId: string, status: Alert["status"]): Alert | null;
+  updateAlertStatus(alertId: string, status: Alert["status"], options?: { suppressedUntil?: string }): Alert | null;
   shutdownRoom(roomId: RoomSlug, reason: string, actor: string): DeviceCommand | null;
   shutdownOffice(reason: string, actor: string): DeviceCommand;
   createReport(format: "csv" | "pdf"): ReportRequest;
@@ -234,6 +234,7 @@ export class InMemoryOfficeRepository implements OfficeRepository {
   hydrateCurrentState(options: {
     deviceStates?: DeviceState[];
     occupancy?: OccupancySnapshot[];
+    activity?: ActivityItem[];
     stateVersion?: number;
   }) {
     for (const state of options.deviceStates ?? []) {
@@ -243,6 +244,10 @@ export class InMemoryOfficeRepository implements OfficeRepository {
     for (const state of options.occupancy ?? []) {
       if (!this.rooms.some((room) => room.slug === state.roomId)) continue;
       this.occupancy.set(state.roomId, { ...state });
+    }
+    if (options.activity && options.activity.length > 0) {
+      this.activity.length = 0;
+      this.activity.push(...options.activity.map((item) => ({ ...item, context: { ...item.context } })));
     }
     this.stateVersion = Math.max(
       this.stateVersion,
@@ -334,11 +339,11 @@ export class InMemoryOfficeRepository implements OfficeRepository {
     return { ...state };
   }
 
-  updateAlertStatus(alertId: string, status: Alert["status"]): Alert | null {
+  updateAlertStatus(alertId: string, status: Alert["status"], options: { suppressedUntil?: string } = {}): Alert | null {
     const current = this.alerts.get(alertId);
     if (!current) return null;
     const timestamp = new Date().toISOString();
-    const next = { ...current, status, updatedAt: timestamp };
+    const next = { ...current, status, updatedAt: timestamp, suppressedUntil: options.suppressedUntil };
     if (status === "resolved") {
       this.alerts.delete(alertId);
     } else {
@@ -411,7 +416,12 @@ export class InMemoryOfficeRepository implements OfficeRepository {
 
   private refreshAlerts(timestamp: string) {
     for (const [id, alert] of this.alerts) {
-      if (alert.status === "active" && (alert.type === "all_room_devices_on_long" || alert.type === "vacant_room_devices_on")) {
+      if (!this.isGeneratedAlert(alert)) continue;
+      const suppressionExpired =
+        alert.status === "snoozed" &&
+        alert.suppressedUntil &&
+        new Date(alert.suppressedUntil).getTime() <= new Date(timestamp).getTime();
+      if (alert.status === "active" || suppressionExpired) {
         this.alerts.delete(id);
       }
     }
@@ -420,38 +430,52 @@ export class InMemoryOfficeRepository implements OfficeRepository {
       const allOn = roomDevices.every((device) => this.deviceStates.get(device.id)?.status === "on");
       if (allOn) {
         const id = `alert-${room.slug}-all-on`;
-        this.alerts.set(id, {
-          id,
-          type: "all_room_devices_on_long",
-          severity: "warning",
-          status: "active",
-          fingerprint: `all-room-devices-on:${room.slug}`,
-          title: `${room.name} has all devices on`,
-          message: "All five devices are on. Verify whether this room still needs full power.",
-          roomId: room.slug,
-          createdAt: timestamp,
-          updatedAt: timestamp
-        });
+        if (!this.isAlertSuppressed(id, timestamp)) {
+          this.alerts.set(id, {
+            id,
+            type: "all_room_devices_on_long",
+            severity: "warning",
+            status: "active",
+            fingerprint: `all-room-devices-on:${room.slug}`,
+            title: `${room.name} has all devices on`,
+            message: "All five devices are on. Verify whether this room still needs full power.",
+            roomId: room.slug,
+            createdAt: timestamp,
+            updatedAt: timestamp
+          });
+        }
       }
 
       const occupancy = this.occupancy.get(room.slug);
       const anyOn = roomDevices.some((device) => this.deviceStates.get(device.id)?.status === "on");
       if (occupancy?.state === "vacant" && anyOn) {
         const id = `alert-${room.slug}-vacant-on`;
-        this.alerts.set(id, {
-          id,
-          type: "vacant_room_devices_on",
-          severity: "warning",
-          status: "active",
-          fingerprint: `vacant-room-devices-on:${room.slug}`,
-          title: `${room.name} is vacant with devices on`,
-          message: "Motion state is vacant while one or more devices remain on.",
-          roomId: room.slug,
-          createdAt: timestamp,
-          updatedAt: timestamp
-        });
+        if (!this.isAlertSuppressed(id, timestamp)) {
+          this.alerts.set(id, {
+            id,
+            type: "vacant_room_devices_on",
+            severity: "warning",
+            status: "active",
+            fingerprint: `vacant-room-devices-on:${room.slug}`,
+            title: `${room.name} is vacant with devices on`,
+            message: "Motion state is vacant while one or more devices remain on.",
+            roomId: room.slug,
+            createdAt: timestamp,
+            updatedAt: timestamp
+          });
+        }
       }
     }
+  }
+
+  private isGeneratedAlert(alert: Alert): boolean {
+    return alert.type === "all_room_devices_on_long" || alert.type === "vacant_room_devices_on";
+  }
+
+  private isAlertSuppressed(alertId: string, timestamp: string): boolean {
+    const alert = this.alerts.get(alertId);
+    if (!alert?.suppressedUntil) return false;
+    return new Date(alert.suppressedUntil).getTime() > new Date(timestamp).getTime();
   }
 
   private recordCommand(
@@ -524,7 +548,7 @@ export function buildOfficeSnapshot(repository: OfficeRepository, options: Snaps
   const states = new Map(repository.getDeviceStates().map((state) => [state.deviceId, state]));
   const occupancy = repository.getOccupancy();
   const occupancyByRoom = new Map(occupancy.map((state) => [state.roomId, state]));
-  const alerts = repository.getAlerts();
+  const alerts = repository.getAlerts().filter((alert) => alert.status === "active");
   const alertsByRoom = new Map<RoomSlug, Alert[]>();
 
   for (const alert of alerts) {

@@ -97,7 +97,7 @@ export function getAlerts() {
   return api<{ alerts: Alert[] }>("/api/v1/alerts");
 }
 
-export function updateAlert(alertId: string, action: "acknowledge" | "resolve" | "snooze" | "mute") {
+export function updateAlert(alertId: string, action: "resolve" | "snooze" | "forget") {
   return api<Alert>(`/api/v1/alerts/${alertId}/${action}`, { method: "POST" });
 }
 
@@ -254,6 +254,33 @@ export function getSettings() {
     currency: string;
     carbonKgPerKwh: number;
   }>("/api/v1/settings");
+}
+
+export function getSimulatorScenarios() {
+  return api<{ scenarios: string[] }>("/api/v1/simulator/scenarios");
+}
+
+export function sendSimulatedDeviceTelemetry(events: Array<{ deviceId: string; status: "on" | "off" | "unknown"; powerWatts?: number }>) {
+  return api<{ updated: DeviceState[] }>("/internal/v1/telemetry/devices", {
+    method: "POST",
+    body: JSON.stringify({
+      events: events.map((event) => ({
+        ...event,
+        observedAt: new Date().toISOString(),
+      })),
+    }),
+  });
+}
+
+export function sendSimulatedOccupancy(roomId: RoomSlug, motionDetected: boolean) {
+  return api(`/internal/v1/telemetry/occupancy`, {
+    method: "POST",
+    body: JSON.stringify({
+      roomId,
+      motionDetected,
+      observedAt: new Date().toISOString(),
+    }),
+  });
 }
 
 export async function withControlRetry<T>(operation: () => Promise<T>): Promise<T> {

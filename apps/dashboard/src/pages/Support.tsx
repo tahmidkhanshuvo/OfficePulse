@@ -16,7 +16,7 @@ const FAQS: FaqItem[] = [
   },
   {
     q: "How do alerts work?",
-    a: "OfficePulse monitors after-hours occupancy, long-running all-device sessions, and vacant-room waste. Alerts appear on the Overview page and can be acknowledged, snoozed, or resolved from the activity log.",
+    a: "OfficePulse monitors after-hours occupancy, long-running all-device sessions, and vacant-room waste. Alerts can be resolved to turn devices off, snoozed for 2 minutes, or forgotten for 1 hour.",
   },
   {
     q: "Why is a device showing as OFF when I just turned it on?",
