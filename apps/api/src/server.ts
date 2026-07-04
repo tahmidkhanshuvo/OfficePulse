@@ -213,6 +213,177 @@ async function readJson(request: Request): Promise<Record<string, unknown>> {
   return value as Record<string, unknown>;
 }
 
+function roomFromText(text: string) {
+  if (/(drawing|living)/.test(text)) return "drawing" as const;
+  if (/(work\s*room\s*1|work1|room\s*1)/.test(text)) return "work1" as const;
+  if (/(work\s*room\s*2|work2|room\s*2)/.test(text)) return "work2" as const;
+  return null;
+}
+
+function deviceTypeFromText(text: string): "fan" | "light" | null {
+  if (/\bfans?\b/.test(text)) return "fan";
+  if (/\blights?\b|lighting/.test(text)) return "light";
+  return null;
+}
+
+function deviceNumberFromText(text: string): number | null {
+  const match = text.match(/\b(?:fan|light)\s*(\d+)\b/);
+  if (!match) return null;
+  const value = Number(match[1]);
+  return Number.isFinite(value) ? value : null;
+}
+
+function formatRoomName(roomId: string) {
+  if (roomId === "drawing") return "Drawing Room";
+  if (roomId === "work1") return "Work Room 1";
+  if (roomId === "work2") return "Work Room 2";
+  return roomId;
+}
+
+function estimateRoomMonthlyCost(powerWatts: number) {
+  const kwh = (powerWatts / 1000) * 24 * 30;
+  return {
+    kwh: Number(kwh.toFixed(2)),
+    cost: Number((kwh * config.defaultTariffPerKwh).toFixed(2))
+  };
+}
+
+async function buildAgentReply(context: RequestContext, message: string) {
+  const lower = message.toLowerCase();
+  const current = snapshot(context);
+  const roomId = roomFromText(lower);
+  const deviceType = deviceTypeFromText(lower);
+  const deviceNumber = deviceNumberFromText(lower);
+  const wantsOff = /(turn|switch|power|shut)\s*(all\s*)?off|shutdown|shut down/.test(lower);
+  const wantsOn = /(turn|switch|power)\s*(all\s*)?on/.test(lower);
+  const toolTrace: Array<{ tool: string; success: boolean; details?: string }> = [];
+
+  if (wantsOff || wantsOn) {
+    const action = wantsOff ? "off" : "on";
+    const controlError = requireControl(context);
+    if (controlError) return controlError;
+
+    if (wantsOff && /(office|everything|all rooms|all devices)/.test(lower)) {
+      office.shutdownOffice("Pulse assistant requested office shutdown", "pulse");
+      telemetryGenerator.syncOffice("off");
+      toolTrace.push({ tool: "propose_office_shutdown", success: true });
+      return json(context, {
+        conversationId: context.url.pathname.split("/")[5] ?? "pulse",
+        answer: "Done. I turned off all office devices.",
+        toolTrace,
+        message
+      });
+    }
+
+    if (roomId && wantsOff && !deviceType) {
+      office.shutdownRoom(roomId, "Pulse assistant requested room shutdown", "pulse");
+      telemetryGenerator.syncRoom(roomId, "off");
+      toolTrace.push({ tool: "propose_room_shutdown", success: true, details: roomId });
+      return json(context, {
+        conversationId: context.url.pathname.split("/")[5] ?? "pulse",
+        answer: `Done. I turned off ${formatRoomName(roomId)}.`,
+        toolTrace,
+        message
+      });
+    }
+
+    let targets = current.devices;
+    if (roomId) targets = targets.filter((device) => device.roomId === roomId);
+    if (deviceType) targets = targets.filter((device) => device.type === deviceType);
+    if (deviceType && deviceNumber) targets = targets.filter((device) => device.label.toLowerCase() === `${deviceType} ${deviceNumber}`);
+    if (targets.length === 0) {
+      return json(context, {
+        conversationId: context.url.pathname.split("/")[5] ?? "pulse",
+        answer: "I could not find a matching device. Try saying the room and device, like 'turn off Work Room 1 fan 1'.",
+        toolTrace: [{ tool: "propose_device_command", success: false, details: "no_target" }],
+        message
+      });
+    }
+    for (const device of targets) {
+      office.updateDeviceState(device.id, action, "api");
+      telemetryGenerator.syncDevice(device.id, action);
+    }
+    toolTrace.push({ tool: "propose_device_command", success: true, details: `${targets.length} devices ${action}` });
+    const scope = roomId ? ` in ${formatRoomName(roomId)}` : "";
+    const label = deviceType ? `${deviceType}${targets.length > 1 ? "s" : ""}` : `${targets.length} device${targets.length === 1 ? "" : "s"}`;
+    return json(context, {
+      conversationId: context.url.pathname.split("/")[5] ?? "pulse",
+      answer: `Done. I turned ${action} ${label}${scope}.`,
+      toolTrace,
+      message
+    });
+  }
+
+  if (/alert|issue|warning/.test(lower)) {
+    const active = current.alerts.filter((alert) => alert.status === "active");
+    toolTrace.push({ tool: "list_active_alerts", success: true });
+    return json(context, {
+      conversationId: context.url.pathname.split("/")[5] ?? "pulse",
+      answer: active.length === 0
+        ? "There are no active alerts right now."
+        : `Active alerts: ${active.map((alert) => `${alert.title} (${alert.severity})`).join("; ")}.`,
+      toolTrace,
+      message
+    });
+  }
+
+  if (/bill|monthly|cost|forecast/.test(lower)) {
+    const lines = current.rooms.map((room) => {
+      const estimate = estimateRoomMonthlyCost(room.powerWatts);
+      return `${room.room.name}: ${estimate.kwh} kWh, ${estimate.cost} ${config.currency}`;
+    });
+    toolTrace.push({ tool: "get_usage_summary", success: true });
+    return json(context, {
+      conversationId: context.url.pathname.split("/")[5] ?? "pulse",
+      answer: `Estimated monthly bill at current load: ${lines.join("; ")}.`,
+      toolTrace,
+      message
+    });
+  }
+
+  if (/advice|recommend|optimi[sz]e|save|waste/.test(lower)) {
+    const activeRooms = current.rooms.filter((room) => room.activeDeviceCount > 0);
+    const vacantWaste = activeRooms.filter((room) => room.occupancy.state === "vacant");
+    const highest = [...current.rooms].sort((a, b) => b.powerWatts - a.powerWatts)[0];
+    const advice = vacantWaste.length > 0
+      ? `Start with ${vacantWaste.map((room) => room.room.name).join(", ")} because it is vacant with devices still on.`
+      : highest
+        ? `${highest.room.name} is drawing the most power at ${highest.powerWatts.toFixed(2)}W. Check whether its fans or lights are still needed.`
+        : "Everything looks quiet right now.";
+    toolTrace.push({ tool: "get_office_snapshot", success: true });
+    return json(context, {
+      conversationId: context.url.pathname.split("/")[5] ?? "pulse",
+      answer: advice,
+      toolTrace,
+      message
+    });
+  }
+
+  if (/health|system|redis|database|api/.test(lower)) {
+    const redis = await checkRedisHealth(config.redisUrl);
+    toolTrace.push({ tool: "get_system_health", success: true });
+    return json(context, {
+      conversationId: context.url.pathname.split("/")[5] ?? "pulse",
+      answer: `System health: API healthy, database ${config.databaseUrl ? "configured" : "not configured"}, Redis ${redis.status}.`,
+      toolTrace,
+      message
+    });
+  }
+
+  const roomLines = current.rooms.map((room) => {
+    const fans = room.devices.filter((device) => device.type === "fan" && device.state.status === "on").length;
+    const lights = room.devices.filter((device) => device.type === "light" && device.state.status === "on").length;
+    return `${room.room.name}: ${room.powerWatts.toFixed(2)}W, ${fans} fans on, ${lights} lights on, occupancy ${room.occupancy.state.replace("_", " ")}`;
+  });
+  toolTrace.push({ tool: "get_office_snapshot", success: true });
+  return json(context, {
+    conversationId: context.url.pathname.split("/")[5] ?? "pulse",
+    answer: `Current office load is ${current.energy.totalPowerWatts.toFixed(2)}W. ${roomLines.join("; ")}.`,
+    toolTrace,
+    message
+  });
+}
+
 function requirePlatform(context: RequestContext): Response | null {
   if (context.session) return null;
   return error(context, 401, "PLATFORM_AUTH_REQUIRED", "A valid platform PIN session is required.");
@@ -744,14 +915,7 @@ async function route(context: RequestContext): Promise<Response> {
   if (method === "POST" && aiMessageMatch) {
     const body = await readJson(request);
     const message = typeof body.message === "string" ? body.message : "";
-    const current = snapshot(context);
-    const answer = `Current office load is ${current.energy.totalPowerWatts} W across ${current.devices.filter((device) => device.state.status === "on").length} active devices.`;
-    return json(context, {
-      conversationId: aiMessageMatch[1],
-      answer,
-      toolTrace: [{ tool: "get_office_snapshot", success: true }],
-      message
-    });
+    return buildAgentReply(context, message);
   }
 
   const aiActionMatch = path.match(/^\/api\/v1\/ai\/actions\/([^/]+)\/(confirm|cancel)$/);

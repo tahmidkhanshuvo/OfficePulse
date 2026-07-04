@@ -190,6 +190,27 @@ function buildRooms(snapshotRooms: OfficeSnapshot["rooms"] | undefined): Room[] 
   });
 }
 
+function tariffFromSnapshot(snapshot: OfficeSnapshot | null): number {
+  if (!snapshot || snapshot.energy.todayKwh <= 0) return 12;
+  const tariff = snapshot.energy.estimatedCostToday / snapshot.energy.todayKwh;
+  return Number.isFinite(tariff) && tariff > 0 ? tariff : 12;
+}
+
+function roomMonthlyForecast(snapshot: OfficeSnapshot | null) {
+  if (!snapshot) return [];
+  const tariff = tariffFromSnapshot(snapshot);
+  return snapshot.rooms.map((room) => {
+    const monthlyKwh = (room.powerWatts / 1000) * 24 * 30;
+    return {
+      roomId: room.room.slug,
+      name: room.room.name,
+      powerWatts: room.powerWatts,
+      monthlyKwh,
+      monthlyCost: monthlyKwh * tariff,
+    };
+  });
+}
+
 export function Overview({ onExit }: OverviewProps) {
   const { snapshot, error: snapshotError, refresh } = useOfficeSnapshot();
   const [activity, setActivity] = useState<ActivityItem[]>([]);
@@ -210,6 +231,8 @@ export function Overview({ onExit }: OverviewProps) {
       })),
     }));
   }, [optimisticStatus, snapshot]);
+  const monthlyForecast = useMemo(() => roomMonthlyForecast(snapshot), [snapshot]);
+  const monthlyTotal = monthlyForecast.reduce((total, room) => total + room.monthlyCost, 0);
 
   useEffect(() => {
     getActivity()
@@ -370,40 +393,86 @@ export function Overview({ onExit }: OverviewProps) {
           </div>
 
           {/* Recent Activity Feed */}
-          <section className="mt-auto bg-surface-panel rounded-xl border border-border-subtle p-4">
-            <div className="flex items-center gap-3 mb-4 border-b border-border-subtle pb-2">
-              <Icon name="history" />
-              <h3 className="font-headline-md text-headline-md text-text-primary">
-                Recent Activity Feed
-              </h3>
+          <section className="mt-auto grid grid-cols-1 xl:grid-cols-[1.35fr_0.65fr] gap-4">
+            <div className="bg-surface-panel rounded-xl border border-border-subtle p-4 min-h-[220px]">
+              <div className="flex items-center gap-3 mb-4 border-b border-border-subtle pb-2">
+                <Icon name="history" />
+                <h3 className="font-headline-md text-headline-md text-text-primary">
+                  Recent Activity Feed
+                </h3>
+              </div>
+              <div className="space-y-3 max-h-[172px] overflow-y-auto pr-2 custom-scrollbar">
+                {(activity.length > 0
+                  ? activity.map((item) => ({
+                      time: formatClock(item.occurredAt),
+                      message: item.message,
+                      actor: item.type.replace(/\./g, " "),
+                    }))
+                  : FALLBACK_ACTIVITY
+                ).map((row) => (
+                  <div
+                    key={`${row.time}-${row.message}`}
+                    className="flex gap-4 items-start text-sm border-l border-white/20 pl-2 py-1"
+                  >
+                    <span className="font-metric-lg text-metric-lg text-text-secondary whitespace-nowrap w-20">
+                      {row.time}
+                    </span>
+                    <span className="font-body-sm text-body-sm text-text-primary flex-1">
+                      {row.message}{" "}
+                      {"emphasis" in row && typeof row.emphasis === "string" ? (
+                        <strong className="text-text-secondary">{row.emphasis}</strong>
+                      ) : null}
+                    </span>
+                    <span className="font-label-caps text-label-caps text-[#FF9D63] bg-surface-panel px-1 py-[2px] rounded uppercase border border-[#FF9D63]">
+                      {row.actor}
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
-            <div className="space-y-3 max-h-[200px] overflow-y-auto pr-2 custom-scrollbar">
-              {(activity.length > 0
-                ? activity.map((item) => ({
-                    time: formatClock(item.occurredAt),
-                    message: item.message,
-                    actor: item.type.replace(/\./g, " "),
-                  }))
-                : FALLBACK_ACTIVITY
-              ).map((row) => (
-                <div
-                  key={`${row.time}-${row.message}`}
-                  className="flex gap-4 items-start text-sm border-l border-white/20 pl-2 py-1"
-                >
-                  <span className="font-metric-lg text-metric-lg text-text-secondary whitespace-nowrap w-20">
-                    {row.time}
-                  </span>
-                  <span className="font-body-sm text-body-sm text-text-primary flex-1">
-                    {row.message}{" "}
-                    {"emphasis" in row && typeof row.emphasis === "string" ? (
-                      <strong className="text-text-secondary">{row.emphasis}</strong>
-                    ) : null}
-                  </span>
-                  <span className="font-label-caps text-label-caps text-[#FF9D63] bg-surface-panel px-1 py-[2px] rounded uppercase border border-[#FF9D63]">
-                    {row.actor}
-                  </span>
+
+            <div className="bg-surface-panel rounded-xl border border-border-subtle p-4 min-h-[220px]">
+              <div className="flex items-center justify-between gap-3 mb-4 border-b border-border-subtle pb-2">
+                <div className="flex items-center gap-3">
+                  <Icon name="payments" />
+                  <h3 className="font-headline-md text-headline-md text-text-primary">
+                    Monthly Forecast
+                  </h3>
                 </div>
-              ))}
+                <span className="font-label-caps text-label-caps text-[#FF9D63] border border-[#FF9D63]/50 rounded-full px-2 py-1 uppercase">
+                  {snapshot?.energy.currency ?? "BDT"}
+                </span>
+              </div>
+              <div className="space-y-2">
+                {(monthlyForecast.length > 0 ? monthlyForecast : rooms.map((room) => ({
+                  roomId: room.slug,
+                  name: room.name,
+                  powerWatts: Number.parseFloat(room.drawValue) || 0,
+                  monthlyKwh: 0,
+                  monthlyCost: 0,
+                }))).map((room) => (
+                  <div key={room.roomId} className="rounded-lg border border-border-subtle bg-black/20 px-3 py-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="font-body-sm text-body-sm text-text-primary">{room.name}</span>
+                      <span className="font-metric-lg text-[15px] leading-5 text-[#FF9D63]">
+                        {room.monthlyCost.toFixed(2)}
+                      </span>
+                    </div>
+                    <div className="mt-1 flex items-center justify-between font-label-caps text-label-caps text-text-secondary uppercase">
+                      <span>{formatWatts(room.powerWatts)}</span>
+                      <span>{room.monthlyKwh.toFixed(2)} kWh/mo</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-3 flex items-center justify-between border-t border-border-subtle pt-3">
+                <span className="font-label-caps text-label-caps text-text-secondary uppercase">
+                  Estimated Total
+                </span>
+                <span className="font-metric-lg text-metric-lg text-text-primary">
+                  {monthlyTotal.toFixed(2)}
+                </span>
+              </div>
             </div>
           </section>
 

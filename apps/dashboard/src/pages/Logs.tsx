@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import type { ActivityItem } from "../../../../packages/contracts/src";
+import type { ActivityItem, OfficeSnapshot } from "../../../../packages/contracts/src";
 import { DashboardChrome } from "../components/DashboardChrome";
 import { getActivity } from "../lib/api";
+import { useOfficeSnapshot } from "../hooks/useOfficeSnapshot";
 
 type LogsProps = {
   onExit?: () => void;
@@ -39,15 +40,43 @@ function formatActivityTime(value: string): string {
   return new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+function snapshotToLogEntries(snapshot: OfficeSnapshot | null): LogEntry[] {
+  if (!snapshot) return [];
+  const now = formatActivityTime(snapshot.generatedAt);
+  const roomEntries = snapshot.rooms.map((room) => ({
+    id: `snapshot-${room.room.slug}`,
+    time: now,
+    message: `${room.room.name}: ${room.activeDeviceCount} devices on, ${room.powerWatts.toFixed(2)}W, occupancy ${room.occupancy.state.replace("_", " ")}.`,
+    category: "SENSOR" as const,
+    alert: room.alerts.length > 0,
+  }));
+  const alertEntries = snapshot.alerts.map((alert) => ({
+    id: `snapshot-alert-${alert.id}`,
+    time: formatActivityTime(alert.updatedAt),
+    message: alert.message,
+    category: "ALERT" as const,
+    alert: true,
+  }));
+  return [
+    ...alertEntries,
+    {
+      id: "snapshot-office",
+      time: now,
+      message: `Office total power ${snapshot.energy.totalPowerWatts.toFixed(2)}W, today ${snapshot.energy.todayKwh.toFixed(2)} kWh.`,
+      category: "SYSTEM" as const,
+    },
+    ...roomEntries,
+  ];
+}
+
 export function Logs({ onExit }: LogsProps) {
+  const { snapshot } = useOfficeSnapshot();
   const [filter, setFilter] = useState<(typeof FILTERS)[number]["id"]>("ALL");
   const [entries, setEntries] = useState<LogEntry[]>([]);
-  const [loadError, setLoadError] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
     return getActivity()
       .then((result) => {
-        setLoadError(null);
         setEntries(
           result.items
             .slice()
@@ -61,8 +90,7 @@ export function Logs({ onExit }: LogsProps) {
             })),
         );
       })
-      .catch((cause) => {
-        setLoadError(cause instanceof Error ? cause.message : "Unable to load live activity.");
+      .catch(() => {
         setEntries([]);
       });
   }, []);
@@ -78,9 +106,10 @@ export function Logs({ onExit }: LogsProps) {
   }, [refresh]);
 
   const visible = useMemo(() => {
-    if (filter === "ALL") return entries;
-    return entries.filter((e) => e.category === filter);
-  }, [entries, filter]);
+    const liveEntries = entries.length > 0 ? entries : snapshotToLogEntries(snapshot);
+    if (filter === "ALL") return liveEntries;
+    return liveEntries.filter((e) => e.category === filter);
+  }, [entries, filter, snapshot]);
 
   return (
     <DashboardChrome active="logs" onExit={onExit}>
@@ -142,11 +171,6 @@ export function Logs({ onExit }: LogsProps) {
 
               {/* Log entries */}
               <div className="flex-1 md:min-h-0 md:overflow-y-auto custom-scrollbar px-4 py-2 space-y-1">
-                {loadError && (
-                  <div className="my-3 rounded-lg border border-[#FF9D63]/40 bg-[#FF9D63]/10 px-3 py-3 font-body-sm text-body-sm text-[#FF9D63]">
-                    {loadError}
-                  </div>
-                )}
                 {visible.map((entry) => (
                   <div
                     key={entry.id}

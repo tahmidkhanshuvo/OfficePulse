@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { sendAiMessage, withControlRetry } from "../lib/api";
 
 type ChatRole = "user" | "bot";
 
@@ -45,42 +46,15 @@ const formatTime = (date: Date) =>
 const SUGGESTIONS = [
   "Which lights are on right now?",
   "Turn off Work Room 1",
-  "Show today's energy summary",
+  "Estimate monthly bill by room",
   "Any active alerts?",
+  "What should I optimize next?",
 ];
-
-const seedReply = (text: string): string => {
-  const lower = text.toLowerCase();
-  if (!lower.trim()) {
-    return "I didn't catch that. Try asking about lights, fans, alerts, or energy usage.";
-  }
-  if (lower.includes("light")) {
-    return "Currently 3 of 6 lights are ON (Drawing Room: 1, Work Room 1: 2). Want me to turn any off?";
-  }
-  if (lower.includes("fan")) {
-    return "Ceiling fans: 1 active in Drawing Room. Work Room fans are OFF. I can toggle them on request.";
-  }
-  if (lower.includes("alert") || lower.includes("issue")) {
-    return "No active alerts. Last warning was a CO₂ spike in Work Room 1, auto-resolved at 09:42.";
-  }
-  if (lower.includes("energy") || lower.includes("power") || lower.includes("summary")) {
-    return "Today's draw: 2.4 kWh peak at 10:15 AM. Projected daily total: 18.6 kWh.";
-  }
-  if (lower.includes("turn off") || lower.includes("switch off")) {
-    return "Acknowledged. Sending the OFF command — I'll confirm once the device acknowledges.";
-  }
-  if (lower.includes("turn on") || lower.includes("switch on")) {
-    return "Acknowledged. Sending the ON command — confirmation will appear in the Logs page.";
-  }
-  if (lower.includes("hello") || lower.includes("hi") || lower.includes("hey")) {
-    return "Hi! I'm Pulse, your office voice assistant. Ask me about devices, alerts, or schedules.";
-  }
-  return "Got it. I'm a demo assistant in this build, but I'm wired to relay control intents to the platform.";
-};
 
 export function Chatbot() {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState("");
+  const [thinking, setThinking] = useState(false);
   const [listening, setListening] = useState(false);
   const [voiceSupported, setVoiceSupported] = useState(false);
   const [voiceError, setVoiceError] = useState<string | null>(null);
@@ -94,6 +68,7 @@ export function Chatbot() {
   ]);
 
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const conversationIdRef = useRef(`chat_${Date.now()}_${Math.random().toString(36).slice(2)}`);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -117,7 +92,7 @@ export function Chatbot() {
     };
   }, []);
 
-  const sendMessage = (text: string) => {
+  const sendMessage = async (text: string) => {
     const trimmed = text.trim();
     if (!trimmed) return;
     const now = new Date();
@@ -129,19 +104,33 @@ export function Chatbot() {
     };
     setMessages((prev) => [...prev, userMsg]);
     setDraft("");
-    // Simulate a brief "thinking" delay before the assistant replies.
-    window.setTimeout(() => {
+    setThinking(true);
+    try {
+      const result = await withControlRetry(() => sendAiMessage(conversationIdRef.current, trimmed));
       const replyAt = new Date();
       setMessages((prev) => [
         ...prev,
         {
           id: `b-${replyAt.getTime()}`,
           role: "bot",
-          text: seedReply(trimmed),
+          text: result.answer,
           time: formatTime(replyAt),
         },
       ]);
-    }, 650);
+    } catch (cause) {
+      const replyAt = new Date();
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `b-${replyAt.getTime()}`,
+          role: "bot",
+          text: cause instanceof Error ? cause.message : "I could not reach the office control API.",
+          time: formatTime(replyAt),
+        },
+      ]);
+    } finally {
+      setThinking(false);
+    }
   };
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
@@ -264,6 +253,13 @@ export function Chatbot() {
             })}
             {!hasMessages && (
               <p className="text-text-secondary text-sm">Start the conversation...</p>
+            )}
+            {thinking && (
+              <div className="flex flex-col gap-1 items-start">
+                <div className="max-w-[85%] px-3 py-2 rounded-2xl text-sm bg-white/5 border border-border-subtle text-text-secondary rounded-bl-sm">
+                  Thinking with live office data...
+                </div>
+              </div>
             )}
           </div>
 

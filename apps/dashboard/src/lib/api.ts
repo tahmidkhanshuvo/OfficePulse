@@ -93,6 +93,18 @@ export function getActivity() {
   return api<{ items: ActivityItem[]; nextCursor: string | null }>("/api/v1/activity");
 }
 
+export function sendAiMessage(conversationId: string, message: string) {
+  return api<{
+    conversationId: string;
+    answer: string;
+    toolTrace: Array<{ tool: string; success: boolean; details?: string }>;
+    message: string;
+  }>(`/api/v1/ai/conversations/${conversationId}/messages`, {
+    method: "POST",
+    body: JSON.stringify({ message }),
+  });
+}
+
 export function getAlerts() {
   return api<{ alerts: Alert[] }>("/api/v1/alerts");
 }
