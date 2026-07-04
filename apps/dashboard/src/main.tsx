@@ -13,6 +13,7 @@ import { PrivacyPolicy } from "./pages/PrivacyPolicy";
 import { Terms } from "./pages/Terms";
 import { ContactSupport } from "./pages/ContactSupport";
 import { deleteSession, getSession } from "./lib/api";
+import { OfficeSnapshotProvider } from "./hooks/useOfficeSnapshot";
 
 type Route =
   | "login"
@@ -91,50 +92,50 @@ function App() {
 
   if (route === "analytics") {
     return (
-      <>
+      <OfficeSnapshotProvider>
         <DeviceAnalytics onExit={exit} />
         <Chatbot />
-      </>
+      </OfficeSnapshotProvider>
     );
   }
   if (route === "map") {
     return (
-      <>
+      <OfficeSnapshotProvider>
         <Map onExit={exit} />
         <Chatbot />
-      </>
+      </OfficeSnapshotProvider>
     );
   }
   if (route === "logs") {
     return (
-      <>
+      <OfficeSnapshotProvider>
         <Logs onExit={exit} />
         <Chatbot />
-      </>
+      </OfficeSnapshotProvider>
     );
   }
   if (route === "simulations") {
     return (
-      <>
+      <OfficeSnapshotProvider>
         <Simulations onExit={exit} />
         <Chatbot />
-      </>
+      </OfficeSnapshotProvider>
     );
   }
   if (route === "settings") {
     return (
-      <>
+      <OfficeSnapshotProvider>
         <Settings onExit={exit} />
         <Chatbot />
-      </>
+      </OfficeSnapshotProvider>
     );
   }
   if (route === "overview") {
     return (
-      <>
+      <OfficeSnapshotProvider>
         <Overview onExit={exit} />
         <Chatbot />
-      </>
+      </OfficeSnapshotProvider>
     );
   }
   if (route === "support") {

@@ -1,9 +1,9 @@
 import { useEffect, useState, type ReactNode, type CSSProperties } from "react";
 import type { Alert } from "../../../../packages/contracts/src";
-import { BrandMark } from "./BrandMark";
 import { useOfficeSnapshot } from "../hooks/useOfficeSnapshot";
 import { getAlerts, updateAlert, withControlRetry } from "../lib/api";
 import { formatKwh, formatWatts } from "../lib/format";
+import { BrandMark } from "./BrandMark";
 
 type Section = "overview" | "map" | "analytics" | "simulations" | "logs" | "settings";
 
@@ -71,16 +71,20 @@ export function DashboardChrome({
     const refreshAlerts = () => {
       getAlerts()
         .then((next) => setAlerts(next.alerts))
-        .catch(() => setAlerts(snapshot?.alerts ?? []));
+        .catch(() => setAlerts([]));
     };
     refreshAlerts();
-    const timer = window.setInterval(refreshAlerts, 5000);
+    const timer = window.setInterval(refreshAlerts, 15000);
     window.addEventListener("focus", refreshAlerts);
     return () => {
       window.clearInterval(timer);
       window.removeEventListener("focus", refreshAlerts);
     };
-  }, [snapshot?.realtime.stateVersion]);
+  }, []);
+
+  useEffect(() => {
+    if (snapshot?.alerts) setAlerts(snapshot.alerts);
+  }, [snapshot?.alerts]);
 
   const handleAlertAction = async (alertId: string, action: "resolve" | "snooze" | "forget") => {
     const updated = await withControlRetry(() => updateAlert(alertId, action));

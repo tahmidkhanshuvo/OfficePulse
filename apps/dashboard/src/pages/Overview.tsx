@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
 import type { ActivityItem, DeviceStatus, OfficeSnapshot, RoomSlug } from "../../../../packages/contracts/src";
 import { DashboardChrome } from "../components/DashboardChrome";
 import {
@@ -253,7 +253,7 @@ export function Overview({ onExit }: OverviewProps) {
   const currentMonthKwh = monthBill?.totalKwh ?? currentMonthRooms.reduce((total, room) => total + room.energyKwh, 0);
   const activityRows = useMemo(() => overviewActivityRows(activity, snapshot), [activity, snapshot]);
 
-  useEffect(() => {
+  const refreshOverviewData = useCallback(() => {
     getActivity()
       .then((next) => setActivity(next.items.slice(0, 6)))
       .catch(() => setActivity([]));
@@ -263,7 +263,17 @@ export function Overview({ onExit }: OverviewProps) {
     getCurrentMonthEnergy()
       .then(setMonthBill)
       .catch(() => setMonthBill(null));
-  }, [snapshot?.realtime.stateVersion]);
+  }, []);
+
+  useEffect(() => {
+    refreshOverviewData();
+    const timer = window.setInterval(refreshOverviewData, 15000);
+    window.addEventListener("focus", refreshOverviewData);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refreshOverviewData);
+    };
+  }, [refreshOverviewData]);
 
   const toggleDevice = async (deviceId: DeviceKey, next: boolean) => {
     setBusyId(deviceId);

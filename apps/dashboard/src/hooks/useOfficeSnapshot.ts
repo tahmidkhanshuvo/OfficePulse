@@ -1,8 +1,17 @@
-import { useCallback, useEffect, useState } from "react";
+import { createContext, createElement, type ReactNode, useCallback, useContext, useEffect, useState } from "react";
 import type { OfficeSnapshot } from "../../../../packages/contracts/src";
 import { getBootstrap } from "../lib/api";
 
-export function useOfficeSnapshot() {
+type OfficeSnapshotState = {
+  snapshot: OfficeSnapshot | null;
+  loading: boolean;
+  error: string | null;
+  refresh: () => Promise<void>;
+};
+
+const OfficeSnapshotContext = createContext<OfficeSnapshotState | null>(null);
+
+function useOfficeSnapshotState(): OfficeSnapshotState {
   const [snapshot, setSnapshot] = useState<OfficeSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -30,4 +39,17 @@ export function useOfficeSnapshot() {
   }, [refresh]);
 
   return { snapshot, loading, error, refresh };
+}
+
+export function OfficeSnapshotProvider({ children }: { children: ReactNode }) {
+  const value = useOfficeSnapshotState();
+  return createElement(OfficeSnapshotContext.Provider, { value }, children);
+}
+
+export function useOfficeSnapshot() {
+  const context = useContext(OfficeSnapshotContext);
+  if (!context) {
+    throw new Error("useOfficeSnapshot must be used within OfficeSnapshotProvider.");
+  }
+  return context;
 }

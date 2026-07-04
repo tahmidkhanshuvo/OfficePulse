@@ -126,6 +126,8 @@ const toIso = (value: Date | string | null): string | null => {
 
 export class PersistentOfficeRepository extends InMemoryOfficeRepository {
   private readonly persistence: OfficePersistence;
+  private snapshotPersistTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly snapshotPersistIntervalMs = Number(Bun.env.SNAPSHOT_PERSIST_INTERVAL_MS ?? 5000);
 
   constructor(persistence: OfficePersistence) {
     super();
@@ -135,14 +137,14 @@ export class PersistentOfficeRepository extends InMemoryOfficeRepository {
   async hydrate() {
     const state = await this.persistence.load();
     this.hydrateCurrentState(state);
-    await this.persistSnapshot();
+    await this.persistSnapshotNow();
   }
 
   override updateDeviceState(deviceId: string, status: "on" | "off", source: DeviceState["source"]) {
     const state = super.updateDeviceState(deviceId, status, source);
     if (state) {
       this.persistence.persistDeviceStates([state], true);
-      this.persistSnapshot();
+      this.persistSnapshotNow();
     }
     return state;
   }
@@ -151,7 +153,7 @@ export class PersistentOfficeRepository extends InMemoryOfficeRepository {
     const updated = super.ingestDeviceTelemetry(events);
     if (updated.length > 0) {
       this.persistence.persistDeviceStates(updated, true);
-      this.persistSnapshot();
+      this.scheduleSnapshotPersist();
     }
     return updated;
   }
@@ -160,7 +162,7 @@ export class PersistentOfficeRepository extends InMemoryOfficeRepository {
     const occupancy = super.ingestOccupancyTelemetry(event);
     if (occupancy) {
       this.persistence.persistOccupancy(occupancy, event.motionDetected);
-      this.persistSnapshot();
+      this.persistSnapshotNow();
     }
     return occupancy;
   }
@@ -187,7 +189,19 @@ export class PersistentOfficeRepository extends InMemoryOfficeRepository {
     return this.persistence.getCurrentMonthRoomEnergy(tariffPerKwh);
   }
 
-  private async persistSnapshot() {
+  private scheduleSnapshotPersist() {
+    if (this.snapshotPersistTimer) return;
+    this.snapshotPersistTimer = setTimeout(() => {
+      this.snapshotPersistTimer = null;
+      void this.persistSnapshotNow();
+    }, this.snapshotPersistIntervalMs);
+  }
+
+  private async persistSnapshotNow() {
+    if (this.snapshotPersistTimer) {
+      clearTimeout(this.snapshotPersistTimer);
+      this.snapshotPersistTimer = null;
+    }
     await this.persistence.persistSnapshot(
       buildOfficeSnapshot(this, this.persistence.snapshotOptions),
       this.getActivity().slice(0, 10)
@@ -260,9 +274,6 @@ export class OfficePersistence {
     try {
       await this.redis.set(redisKeys.officeSnapshot, JSON.stringify(snapshot));
       await this.redis.publish(redisStreams.realtime, JSON.stringify({ type: "office.snapshot", snapshot }));
-      for (const item of activity) {
-        await this.redis.set(`activity:${item.id}`, JSON.stringify(item));
-      }
     } catch (cause) {
       this.logger?.warn("Unable to persist office snapshot to Redis", errorContext(cause));
     }
