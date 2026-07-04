@@ -1,5 +1,6 @@
 import { type ReactNode, type CSSProperties } from "react";
 import { BrandMark } from "./BrandMark";
+import { useOfficeSnapshot } from "../hooks/useOfficeSnapshot";
 
 type Section = "overview" | "map" | "analytics" | "logs" | "settings";
 
@@ -57,12 +58,13 @@ export function DashboardChrome({
   topNavCenter,
   children,
 }: DashboardChromeProps) {
+  const { snapshot } = useOfficeSnapshot();
   const center =
     topNavCenter ?? (
       <>
-        <MetricChip label="Total Office Power" value="450W" />
+        <MetricChip label="Total Office Power" value={snapshot ? `${snapshot.energy.totalPowerWatts}W` : "450W"} />
         <div className="h-8 w-px bg-border-subtle" />
-        <MetricChip label="Today" value="12.4 kWh" />
+        <MetricChip label="Today" value={snapshot ? `${snapshot.energy.todayKwh} kWh` : "12.4 kWh"} />
       </>
     );
 

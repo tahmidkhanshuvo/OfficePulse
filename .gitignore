@@ -46,6 +46,8 @@ bun-debug.log*
 *.sqlite3
 *.db
 *.csv
+docs/postman-all-api.collection.json
+docs/postman-officepulse-render.environment.json
 *.tmp
 *.temp
 tmp/

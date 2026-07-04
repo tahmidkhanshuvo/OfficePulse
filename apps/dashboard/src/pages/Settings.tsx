@@ -1,17 +1,28 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import type { ReportRequest } from "../../../../packages/contracts/src";
 import { DashboardChrome } from "../components/DashboardChrome";
+import {
+  createReport,
+  getReports,
+  getSettings,
+  getSystemComponents,
+  reportDownloadUrl,
+  withControlRetry,
+} from "../lib/api";
 
 type SettingsProps = {
   onExit?: () => void;
 };
 
-type SettingsSection = "profile" | "authentication" | "preferences" | "security";
+type SettingsSection = "profile" | "authentication" | "preferences" | "security" | "reports" | "system";
 
 const SUBNAV: { id: SettingsSection; label: string; icon: string }[] = [
   { id: "profile", label: "Profile", icon: "person" },
   { id: "authentication", label: "Authentication", icon: "security" },
   { id: "preferences", label: "Preferences", icon: "tune" },
   { id: "security", label: "Security", icon: "shield_lock" },
+  { id: "reports", label: "Reports", icon: "description" },
+  { id: "system", label: "System", icon: "monitor_heart" },
 ];
 
 export function Settings({ onExit }: SettingsProps) {
@@ -40,6 +51,32 @@ export function Settings({ onExit }: SettingsProps) {
   const [sessionTimeout, setSessionTimeout] = useState("30");
   const [pinRequired, setPinRequired] = useState(true);
   const [auditLog, setAuditLog] = useState(true);
+  const [officeSettings, setOfficeSettings] = useState<Awaited<ReturnType<typeof getSettings>> | null>(null);
+  const [reports, setReports] = useState<ReportRequest[]>([]);
+  const [components, setComponents] = useState<Array<{ id: string; status: string; lastSeenAt: string }>>([]);
+  const [busyReport, setBusyReport] = useState<"csv" | "pdf" | null>(null);
+
+  useEffect(() => {
+    getSettings()
+      .then(setOfficeSettings)
+      .catch(() => setOfficeSettings(null));
+    getReports()
+      .then((next) => setReports(next.reports))
+      .catch(() => setReports([]));
+    getSystemComponents()
+      .then((next) => setComponents(next.components))
+      .catch(() => setComponents([]));
+  }, []);
+
+  const handleCreateReport = async (format: "csv" | "pdf") => {
+    setBusyReport(format);
+    try {
+      const report = await withControlRetry(() => createReport(format));
+      setReports((prev) => [report, ...prev.filter((item) => item.id !== report.id)]);
+    } finally {
+      setBusyReport(null);
+    }
+  };
 
   return (
     <DashboardChrome active="settings" onExit={onExit}>
@@ -226,7 +263,7 @@ export function Settings({ onExit }: SettingsProps) {
                   <div className="flex flex-col divide-y divide-border-subtle">
                     <ToggleRow
                       title="Auto-dim after hours"
-                      description="Reduce brightness of all lights after 8:00 PM."
+                      description={`Reduce brightness after office close${officeSettings ? ` (${officeSettings.officeCloseTime})` : ""}.`}
                       checked={autoDim}
                       onChange={setAutoDim}
                     />
@@ -244,7 +281,7 @@ export function Settings({ onExit }: SettingsProps) {
                     />
                     <ToggleRow
                       title="Night mode"
-                      description="Mute all non-critical notifications between 10 PM and 7 AM."
+                      description={`Mute non-critical notifications outside ${officeSettings?.officeOpenTime ?? "09:00"}-${officeSettings?.officeCloseTime ?? "17:00"}.`}
                       checked={nightMode}
                       onChange={setNightMode}
                     />
@@ -288,6 +325,103 @@ export function Settings({ onExit }: SettingsProps) {
                       checked={auditLog}
                       onChange={setAuditLog}
                     />
+                  </div>
+                </section>
+              )}
+
+              {section === "reports" && (
+                <section className="bg-surface-panel backdrop-blur-xl border border-border-subtle rounded-xl p-6">
+                  <h3 className="font-headline-md text-headline-md text-text-primary mb-6 flex items-center gap-2">
+                    <span className="material-symbols-outlined text-[18px] text-[#FF9D63]">
+                      description
+                    </span>
+                    Reports
+                  </h3>
+                  <div className="flex flex-wrap gap-3 mb-6">
+                    <button
+                      type="button"
+                      disabled={busyReport === "csv"}
+                      onClick={() => handleCreateReport("csv")}
+                      className="font-label-caps text-label-caps uppercase px-4 py-2 rounded-full bg-[#FF9D63] text-black hover:bg-[#FFB07F] transition-colors disabled:opacity-50"
+                    >
+                      Create CSV
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busyReport === "pdf"}
+                      onClick={() => handleCreateReport("pdf")}
+                      className="font-label-caps text-label-caps uppercase px-4 py-2 rounded-full bg-surface-panel border border-[#FF9D63] text-[#FF9D63] hover:bg-[#FF9D63]/10 transition-colors disabled:opacity-50"
+                    >
+                      Create PDF
+                    </button>
+                    <a
+                      href={reportDownloadUrl("csv")}
+                      className="font-label-caps text-label-caps uppercase px-4 py-2 rounded-full border border-border-subtle text-text-secondary hover:text-text-primary transition-colors"
+                    >
+                      Download CSV
+                    </a>
+                    <a
+                      href={reportDownloadUrl("pdf")}
+                      className="font-label-caps text-label-caps uppercase px-4 py-2 rounded-full border border-border-subtle text-text-secondary hover:text-text-primary transition-colors"
+                    >
+                      Download PDF
+                    </a>
+                  </div>
+                  <div className="flex flex-col gap-3">
+                    {reports.length === 0 && (
+                      <div className="font-body-sm text-body-sm text-text-secondary border border-border-subtle rounded-lg px-3 py-3">
+                        No generated reports yet.
+                      </div>
+                    )}
+                    {reports.map((report) => (
+                      <div key={report.id} className="border border-border-subtle rounded-lg p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div>
+                          <div className="font-body-base text-body-base text-text-primary">
+                            {report.format.toUpperCase()} report
+                          </div>
+                          <div className="font-label-caps text-label-caps text-text-secondary uppercase">
+                            {report.status} • {new Date(report.requestedAt).toLocaleString()}
+                          </div>
+                        </div>
+                        <span className="font-label-caps text-label-caps text-[#FF9D63] border border-[#FF9D63]/50 rounded-full px-3 py-1 uppercase">
+                          {report.id.slice(0, 12)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {section === "system" && (
+                <section className="bg-surface-panel backdrop-blur-xl border border-border-subtle rounded-xl p-6">
+                  <h3 className="font-headline-md text-headline-md text-text-primary mb-6 flex items-center gap-2">
+                    <span className="material-symbols-outlined text-[18px] text-[#FF9D63]">
+                      monitor_heart
+                    </span>
+                    System Health
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    {components.map((component) => (
+                      <div key={component.id} className="border border-border-subtle rounded-lg p-4 bg-surface-panel">
+                        <div className="flex items-center justify-between gap-3 mb-3">
+                          <span className="font-label-caps text-label-caps text-text-secondary uppercase">
+                            {component.id}
+                          </span>
+                          <span className="h-2 w-2 rounded-full bg-[#FF9D63] animate-pulse" />
+                        </div>
+                        <div className="font-metric-lg text-metric-lg text-text-primary uppercase">
+                          {component.status}
+                        </div>
+                        <div className="font-body-sm text-body-sm text-text-secondary mt-1">
+                          Last seen {new Date(component.lastSeenAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                        </div>
+                      </div>
+                    ))}
+                    {components.length === 0 && (
+                      <div className="font-body-sm text-body-sm text-text-secondary border border-border-subtle rounded-lg px-3 py-3 md:col-span-3">
+                        System status is unavailable.
+                      </div>
+                    )}
                   </div>
                 </section>
               )}

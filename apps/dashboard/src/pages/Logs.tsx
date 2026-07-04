@@ -1,5 +1,7 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import type { ActivityItem } from "../../../../packages/contracts/src";
 import { DashboardChrome } from "../components/DashboardChrome";
+import { getActivity } from "../lib/api";
 
 type LogsProps = {
   onExit?: () => void;
@@ -115,13 +117,45 @@ const ENTRIES: LogEntry[] = [
   },
 ];
 
+function categoryFromActivity(item: ActivityItem): LogCategory {
+  if (item.type.includes("alert")) return "ALERT";
+  if (item.type.includes("telemetry") || item.type.includes("occupancy")) return "SENSOR";
+  if (item.type.includes("device")) return item.type.includes("api") ? "USER" : "SYSTEM";
+  return "SYSTEM";
+}
+
+function formatActivityTime(value: string): string {
+  return new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
 export function Logs({ onExit }: LogsProps) {
   const [filter, setFilter] = useState<(typeof FILTERS)[number]["id"]>("ALL");
+  const [entries, setEntries] = useState<LogEntry[]>(ENTRIES);
+
+  useEffect(() => {
+    getActivity()
+      .then((result) => {
+        if (result.items.length === 0) return;
+        setEntries(
+          result.items
+            .slice()
+            .reverse()
+            .map((item) => ({
+              id: item.id,
+              time: formatActivityTime(item.occurredAt),
+              message: item.message,
+              category: categoryFromActivity(item),
+              alert: item.type.includes("alert"),
+            })),
+        );
+      })
+      .catch(() => setEntries(ENTRIES));
+  }, []);
 
   const visible = useMemo(() => {
-    if (filter === "ALL") return ENTRIES;
-    return ENTRIES.filter((e) => e.category === filter);
-  }, [filter]);
+    if (filter === "ALL") return entries;
+    return entries.filter((e) => e.category === filter);
+  }, [entries, filter]);
 
   return (
     <DashboardChrome active="logs" onExit={onExit}>

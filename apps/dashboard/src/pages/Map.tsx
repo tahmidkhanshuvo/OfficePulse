@@ -1,5 +1,8 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import type { RoomSlug } from "../../../../packages/contracts/src";
 import { DashboardChrome } from "../components/DashboardChrome";
+import { commandDevice, withControlRetry } from "../lib/api";
+import { useOfficeSnapshot } from "../hooks/useOfficeSnapshot";
 
 type MapProps = {
   onExit?: () => void;
@@ -14,6 +17,8 @@ const INITIAL_LIGHTS: LightState = {
   work1: [false, false, false],
   work2: [true, true, true],
 };
+
+const lightId = (room: RoomId, idx: number) => `${room}-light-${idx + 1}`;
 
 function Icon({ name }: { name: string }) {
   return (
@@ -55,13 +60,55 @@ function LightDot({
 }
 
 export function Map({ onExit }: MapProps) {
+  const { snapshot, refresh } = useOfficeSnapshot();
   const [lights, setLights] = useState<LightState>(INITIAL_LIGHTS);
+  const [busyLight, setBusyLight] = useState<string | null>(null);
 
-  const toggle = (room: RoomId, idx: number) =>
+  useEffect(() => {
+    if (!snapshot) return;
+    setLights({
+      drawing: [0, 1, 2].map((idx) => snapshot.devices.find((device) => device.id === lightId("drawing", idx))?.state.status === "on"),
+      work1: [0, 1, 2].map((idx) => snapshot.devices.find((device) => device.id === lightId("work1", idx))?.state.status === "on"),
+      work2: [0, 1, 2].map((idx) => snapshot.devices.find((device) => device.id === lightId("work2", idx))?.state.status === "on"),
+    });
+  }, [snapshot]);
+
+  const toggle = async (room: RoomId, idx: number) => {
+    const deviceId = lightId(room, idx);
+    const next = !lights[room][idx];
+    setBusyLight(deviceId);
     setLights((prev) => ({
       ...prev,
-      [room]: prev[room].map((v, i) => (i === idx ? !v : v)),
+      [room]: prev[room].map((v, i) => (i === idx ? next : v)),
     }));
+    try {
+      await withControlRetry(() => commandDevice(deviceId, next ? "on" : "off"));
+      await refresh();
+    } catch {
+      setLights((prev) => ({
+        ...prev,
+        [room]: prev[room].map((v, i) => (i === idx ? !next : v)),
+      }));
+    } finally {
+      setBusyLight(null);
+    }
+  };
+
+  const roomCounts = useMemo(() => {
+    const fallback: Record<RoomSlug, { fans: number; lights: number }> = {
+      drawing: { fans: 2, lights: 3 },
+      work1: { fans: 2, lights: 3 },
+      work2: { fans: 2, lights: 3 },
+    };
+    if (!snapshot) return fallback;
+    return snapshot.rooms.reduce((acc, room) => {
+      acc[room.room.slug] = {
+        fans: room.devices.filter((device) => device.type === "fan").length,
+        lights: room.devices.filter((device) => device.type === "light").length,
+      };
+      return acc;
+    }, fallback);
+  }, [snapshot]);
 
   const roomWise = [
     { id: "drawing", label: "Drawing Room", tint: "yellow" },
@@ -133,12 +180,12 @@ export function Map({ onExit }: MapProps) {
                 <LightDot
                   active={lights.drawing[0]}
                   onClick={() => toggle("drawing", 0)}
-                  className="top-[15%] left-[20%]"
+                  className={`top-[15%] left-[20%] ${busyLight === lightId("drawing", 0) ? "opacity-50" : ""}`}
                 />
                 <LightDot
                   active={lights.drawing[1]}
                   onClick={() => toggle("drawing", 1)}
-                  className="top-[15%] right-[20%]"
+                  className={`top-[15%] right-[20%] ${busyLight === lightId("drawing", 1) ? "opacity-50" : ""}`}
                 />
                 {/* Fans */}
                 <div className="absolute top-[15%] left-[50%] -translate-x-1/2 w-8 h-8 flex items-center justify-center z-20">
@@ -154,7 +201,7 @@ export function Map({ onExit }: MapProps) {
                 <LightDot
                   active={lights.drawing[2]}
                   onClick={() => toggle("drawing", 2)}
-                  className="bottom-[20%] left-[30%]"
+                  className={`bottom-[20%] left-[30%] ${busyLight === lightId("drawing", 2) ? "opacity-50" : ""}`}
                 />
                 {/* Door */}
                 <div className="absolute bottom-[-4px] right-[10%] w-[40px] h-[40px] z-40 bg-[#111]">
@@ -195,12 +242,12 @@ export function Map({ onExit }: MapProps) {
                 <LightDot
                   active={lights.work1[0]}
                   onClick={() => toggle("work1", 0)}
-                  className="top-[10%] left-[15%]"
+                  className={`top-[10%] left-[15%] ${busyLight === lightId("work1", 0) ? "opacity-50" : ""}`}
                 />
                 <LightDot
                   active={lights.work1[1]}
                   onClick={() => toggle("work1", 1)}
-                  className="top-[10%] right-[15%]"
+                  className={`top-[10%] right-[15%] ${busyLight === lightId("work1", 1) ? "opacity-50" : ""}`}
                 />
                 <div className="absolute top-[15%] left-[50%] -translate-x-1/2 w-8 h-8 flex items-center justify-center z-20">
                   <span className="material-symbols-outlined text-white spin-slow text-[32px] opacity-40">
@@ -215,7 +262,7 @@ export function Map({ onExit }: MapProps) {
                 <LightDot
                   active={lights.work1[2]}
                   onClick={() => toggle("work1", 2)}
-                  className="bottom-[15%] left-[50%] -translate-x-1/2"
+                  className={`bottom-[15%] left-[50%] -translate-x-1/2 ${busyLight === lightId("work1", 2) ? "opacity-50" : ""}`}
                 />
                 {/* Door */}
                 <div className="absolute bottom-[-4px] left-[5%] w-[40px] h-[40px] z-40 bg-[#111]">
@@ -257,12 +304,12 @@ export function Map({ onExit }: MapProps) {
                 <LightDot
                   active={lights.work2[0]}
                   onClick={() => toggle("work2", 0)}
-                  className="top-[10%] left-[15%]"
+                  className={`top-[10%] left-[15%] ${busyLight === lightId("work2", 0) ? "opacity-50" : ""}`}
                 />
                 <LightDot
                   active={lights.work2[1]}
                   onClick={() => toggle("work2", 1)}
-                  className="top-[10%] right-[15%]"
+                  className={`top-[10%] right-[15%] ${busyLight === lightId("work2", 1) ? "opacity-50" : ""}`}
                 />
                 <div className="absolute top-[15%] left-[50%] -translate-x-1/2 w-8 h-8 flex items-center justify-center z-20">
                   <span className="material-symbols-outlined text-white spin-slow text-[32px] opacity-80">
@@ -277,7 +324,7 @@ export function Map({ onExit }: MapProps) {
                 <LightDot
                   active={lights.work2[2]}
                   onClick={() => toggle("work2", 2)}
-                  className="bottom-[15%] left-[50%] -translate-x-1/2"
+                  className={`bottom-[15%] left-[50%] -translate-x-1/2 ${busyLight === lightId("work2", 2) ? "opacity-50" : ""}`}
                 />
                 {/* Door */}
                 <div className="absolute bottom-[-4px] left-[5%] w-[40px] h-[40px] z-40 bg-[#111]">
@@ -336,10 +383,10 @@ export function Map({ onExit }: MapProps) {
                       {r.label.toUpperCase()}
                     </div>
                     <div className="font-body-sm text-text-primary text-[12px]">
-                      2 Fans
+                      {roomCounts[r.id].fans} Fans
                     </div>
                     <div className="font-body-sm text-text-primary text-[12px]">
-                      3 Lights
+                      {roomCounts[r.id].lights} Lights
                     </div>
                   </div>
                 ))}

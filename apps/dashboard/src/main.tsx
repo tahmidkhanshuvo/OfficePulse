@@ -11,6 +11,7 @@ import { Support } from "./pages/Support";
 import { PrivacyPolicy } from "./pages/PrivacyPolicy";
 import { Terms } from "./pages/Terms";
 import { ContactSupport } from "./pages/ContactSupport";
+import { deleteSession } from "./lib/api";
 
 type Route =
   | "login"
@@ -47,7 +48,11 @@ function App() {
     return () => window.removeEventListener("hashchange", onHashChange);
   }, []);
 
-  const exit = () => (window.location.hash = "#/login");
+  const exit = () => {
+    deleteSession().finally(() => {
+      window.location.hash = "#/login";
+    });
+  };
 
   if (route === "analytics") {
     return (

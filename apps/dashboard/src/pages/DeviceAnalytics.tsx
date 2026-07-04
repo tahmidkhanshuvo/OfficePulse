@@ -1,4 +1,17 @@
+import { useEffect, useMemo, useState } from "react";
 import { DashboardChrome } from "../components/DashboardChrome";
+import type { ActivityItem, RoomSlug } from "../../../../packages/contracts/src";
+import {
+  getBillForecast,
+  getDeviceHistory,
+  getDeviceMaintenance,
+  getDeviceUsage,
+  getEnergyCarbon,
+  getEnergyHistory,
+  getEnergyRankings,
+  getEnergySavings,
+} from "../lib/api";
+import { useOfficeSnapshot } from "../hooks/useOfficeSnapshot";
 
 type DeviceAnalyticsProps = {
   onExit?: () => void;
@@ -17,6 +30,69 @@ function Icon({ name }: { name: string }) {
 }
 
 export function DeviceAnalytics({ onExit }: DeviceAnalyticsProps) {
+  const { snapshot } = useOfficeSnapshot();
+  const selectedDevice = useMemo(
+    () => snapshot?.devices.find((device) => device.id === "work1-light-2") ?? snapshot?.devices[0],
+    [snapshot],
+  );
+  const [usage, setUsage] = useState<{
+    powerWatts: number;
+    todayKwh: number;
+    estimatedCostToday: number;
+  } | null>(null);
+  const [historyBars, setHistoryBars] = useState(BAR_PCT);
+  const [energyStats, setEnergyStats] = useState<{
+    carbon?: { energyKwh: number; kgCo2e: number; factor: number };
+    savings?: { estimatedKwhSaved: number; estimatedCostSaved: number; evidence: string };
+    forecast?: { monthEndCost: number; currency: string; confidence: string };
+    rankings?: {
+      rooms: Array<{ roomId: RoomSlug; name: string; powerWatts: number }>;
+      devices: Array<{ deviceId: string; label: string; roomId: RoomSlug; powerWatts: number }>;
+    };
+  }>({});
+  const [maintenance, setMaintenance] = useState<{
+    status: string;
+    runtimeHours: number;
+    recommendations: string[];
+  } | null>(null);
+  const [deviceHistory, setDeviceHistory] = useState<ActivityItem[]>([]);
+
+  useEffect(() => {
+    if (!selectedDevice) return;
+    getDeviceUsage(selectedDevice.id)
+      .then((next) => setUsage(next))
+      .catch(() => setUsage(null));
+    getDeviceMaintenance(selectedDevice.id)
+      .then(setMaintenance)
+      .catch(() => setMaintenance(null));
+    getDeviceHistory(selectedDevice.id)
+      .then((next) => setDeviceHistory(next.items.slice(-4).reverse()))
+      .catch(() => setDeviceHistory([]));
+  }, [selectedDevice]);
+
+  useEffect(() => {
+    getEnergyHistory()
+      .then((history) => {
+        const max = Math.max(...history.points.map((point) => point.powerWatts), 1);
+        const points = history.points.map((point) => Math.max(8, Math.round((point.powerWatts / max) * 100)));
+        if (points.length > 0) setHistoryBars(points);
+      })
+      .catch(() => setHistoryBars(BAR_PCT));
+  }, []);
+
+  useEffect(() => {
+    Promise.allSettled([getEnergyCarbon(), getEnergySavings(), getBillForecast(), getEnergyRankings()]).then(
+      ([carbon, savings, forecast, rankings]) => {
+        setEnergyStats({
+          carbon: carbon.status === "fulfilled" ? carbon.value : undefined,
+          savings: savings.status === "fulfilled" ? savings.value : undefined,
+          forecast: forecast.status === "fulfilled" ? forecast.value : undefined,
+          rankings: rankings.status === "fulfilled" ? rankings.value : undefined,
+        });
+      },
+    );
+  }, []);
+
   return (
     <DashboardChrome active="analytics" onExit={onExit}>
       <main className="pt-20 md:pl-64 md:h-screen md:overflow-hidden flex flex-col">
@@ -26,22 +102,22 @@ export function DeviceAnalytics({ onExit }: DeviceAnalyticsProps) {
             <div>
               <div className="flex items-center gap-3 mb-1">
                 <h1 className="font-headline-md text-headline-md text-text-primary">
-                  Work Room 1 - Light 2
+                  {selectedDevice ? `${selectedDevice.roomId} - ${selectedDevice.label}` : "Work Room 1 - Light 2"}
                 </h1>
                 <span className="bg-surface-panel text-text-primary border border-border-subtle px-3 py-1 rounded-full font-label-caps text-label-caps flex items-center gap-1">
                   <span className="w-2 h-2 rounded-full bg-[#FF9D63] animate-pulse shadow-[0_0_8px_#FF9D63]" />
-                  ON
+                  {(selectedDevice?.state.status ?? "on").toUpperCase()}
                 </span>
               </div>
               <p className="font-body-base text-body-base text-text-secondary flex items-center gap-1">
                 <span className="material-symbols-outlined text-[16px]">bolt</span>
-                Current Draw: 15W
+                Current Draw: {usage?.powerWatts ?? selectedDevice?.state.powerWatts ?? 15}W
               </p>
             </div>
             <div className="text-right">
               <p className="font-body-sm text-body-sm text-text-secondary">Last toggled by</p>
               <p className="font-body-base text-body-base text-text-primary font-semibold">
-                Nafisa Rahman
+                {selectedDevice?.state.source ?? "Nafisa Rahman"}
               </p>
             </div>
           </section>
@@ -56,7 +132,7 @@ export function DeviceAnalytics({ onExit }: DeviceAnalyticsProps) {
                 Total Uptime Today
               </h3>
               <div className="font-metric-lg text-metric-lg text-text-primary tabular-nums tracking-tighter">
-                6.5{" "}
+                {selectedDevice?.state.status === "on" ? "8" : "0"}{" "}
                 <span className="font-body-sm text-body-sm text-text-secondary ml-1">Hours</span>
               </div>
             </div>
@@ -70,7 +146,7 @@ export function DeviceAnalytics({ onExit }: DeviceAnalyticsProps) {
                 Energy Consumed Today
               </h3>
               <div className="font-metric-lg text-metric-lg text-text-primary tabular-nums tracking-tighter">
-                0.09{" "}
+                {usage?.todayKwh ?? "0.09"}{" "}
                 <span className="font-body-sm text-body-sm text-text-secondary ml-1">kWh</span>
               </div>
             </div>
@@ -89,8 +165,8 @@ export function DeviceAnalytics({ onExit }: DeviceAnalyticsProps) {
                 </span>
               </div>
               <div className="flex-1 flex items-end gap-1 h-48 border-b border-border-subtle pb-1">
-                {BAR_PCT.map((pct, i) => {
-                  const isPeak = pct === Math.max(...BAR_PCT);
+                {historyBars.map((pct, i) => {
+                  const isPeak = pct === Math.max(...historyBars);
                   return (
                     <div
                       key={i}
@@ -185,9 +261,106 @@ export function DeviceAnalytics({ onExit }: DeviceAnalyticsProps) {
               </div>
             </div>
           </section>
+
+          <section className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+            <MetricPanel
+              icon="co2"
+              label="Carbon Today"
+              value={`${energyStats.carbon?.kgCo2e ?? "0.000"} kg`}
+              detail={`${energyStats.carbon?.energyKwh ?? 0} kWh tracked`}
+            />
+            <MetricPanel
+              icon="savings"
+              label="Savings"
+              value={`${energyStats.savings?.estimatedKwhSaved ?? 0} kWh`}
+              detail={energyStats.savings?.evidence ?? "No completed automation savings yet."}
+            />
+            <MetricPanel
+              icon="payments"
+              label="Bill Forecast"
+              value={`${energyStats.forecast?.monthEndCost ?? 0} ${energyStats.forecast?.currency ?? "BDT"}`}
+              detail={energyStats.forecast?.confidence ?? "demo-estimate"}
+            />
+            <MetricPanel
+              icon="health_and_safety"
+              label="Maintenance"
+              value={(maintenance?.status ?? "ok").toUpperCase()}
+              detail={`${maintenance?.runtimeHours ?? 0} runtime hours`}
+            />
+          </section>
+
+          <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="bg-surface-panel backdrop-blur-xl p-4 rounded-xl border border-border-subtle">
+              <h3 className="font-label-caps text-label-caps text-text-secondary mb-3">
+                Power Rankings
+              </h3>
+              <div className="space-y-2">
+                {(energyStats.rankings?.devices.slice(0, 5) ?? []).map((device) => (
+                  <div key={device.deviceId} className="flex items-center justify-between gap-3 border border-border-subtle rounded-lg px-3 py-2">
+                    <div>
+                      <div className="font-body-sm text-body-sm text-text-primary">{device.label}</div>
+                      <div className="font-label-caps text-label-caps text-text-secondary uppercase">{device.roomId}</div>
+                    </div>
+                    <div className="font-metric-lg text-metric-lg text-[#FF9D63]">{device.powerWatts}W</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="bg-surface-panel backdrop-blur-xl p-4 rounded-xl border border-border-subtle">
+              <h3 className="font-label-caps text-label-caps text-text-secondary mb-3">
+                Device History &amp; Recommendations
+              </h3>
+              <div className="space-y-2 mb-4">
+                {(deviceHistory.length > 0 ? deviceHistory : []).map((item) => (
+                  <div key={item.id} className="border border-border-subtle rounded-lg px-3 py-2">
+                    <div className="font-body-sm text-body-sm text-text-primary">{item.message}</div>
+                    <div className="font-label-caps text-label-caps text-text-secondary uppercase">
+                      {new Date(item.occurredAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                    </div>
+                  </div>
+                ))}
+                {deviceHistory.length === 0 && (
+                  <div className="font-body-sm text-body-sm text-text-secondary border border-border-subtle rounded-lg px-3 py-2">
+                    No device-specific history yet.
+                  </div>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {(maintenance?.recommendations.length ? maintenance.recommendations : ["No maintenance action required."]).map((item) => (
+                  <span key={item} className="font-label-caps text-label-caps text-[#FF9D63] border border-[#FF9D63]/50 rounded-full px-3 py-1 uppercase">
+                    {item}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </section>
         </div>
       </main>
     </DashboardChrome>
+  );
+}
+
+function MetricPanel({
+  icon,
+  label,
+  value,
+  detail,
+}: {
+  icon: string;
+  label: string;
+  value: string;
+  detail: string;
+}) {
+  return (
+    <div className="bg-surface-panel backdrop-blur-xl p-4 rounded-xl border border-border-subtle relative overflow-hidden">
+      <span className="material-symbols-outlined absolute right-3 top-3 text-[#FF9D63] opacity-30">
+        {icon}
+      </span>
+      <h3 className="font-label-caps text-label-caps text-text-secondary mb-1">{label}</h3>
+      <div className="font-metric-lg text-metric-lg text-text-primary">{value}</div>
+      <p className="font-body-sm text-body-sm text-text-secondary mt-1 line-clamp-2">{detail}</p>
+    </div>
   );
 }
 

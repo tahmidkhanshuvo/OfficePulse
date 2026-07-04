@@ -1,13 +1,25 @@
 import { useState, type FormEvent } from "react";
+import { verifyPlatformPin } from "../lib/api";
 
 export function AdminLogin() {
   const [adminId, setAdminId] = useState("");
   const [securityKey, setSecurityKey] = useState("");
   const [showKey, setShowKey] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    // Placeholder: wire up to /api/auth/login once the API contract is finalized.
+    setSubmitting(true);
+    setError(null);
+    try {
+      await verifyPlatformPin(securityKey.trim());
+      window.location.hash = "#/overview";
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to authenticate.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -126,11 +138,17 @@ export function AdminLogin() {
 
           {/* Actions */}
           <div className="flex flex-col gap-4 mt-2">
+            {error && (
+              <p className="font-body-sm text-body-sm text-[#FF9D63] border border-[#FF9D63]/40 bg-[#FF9D63]/10 rounded-lg px-3 py-2">
+                {error}
+              </p>
+            )}
             <button
               type="submit"
-              className="w-full btn-gradient py-3 rounded-lg font-body-base text-body-base font-semibold flex items-center justify-center gap-2 transition-all duration-200 active:scale-[0.98]"
+              disabled={submitting || securityKey.trim().length === 0}
+              className="w-full btn-gradient py-3 rounded-lg font-body-base text-body-base font-semibold flex items-center justify-center gap-2 transition-all duration-200 active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              Authenticate
+              {submitting ? "Authenticating..." : "Authenticate"}
               <span
                 className="material-symbols-outlined text-[18px]"
                 style={{ color: "#000" }}
