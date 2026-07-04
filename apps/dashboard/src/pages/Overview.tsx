@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
-import type { ActivityItem, Alert, DeviceStatus, OfficeSnapshot, RoomSlug } from "../../../../packages/contracts/src";
+import type { ActivityItem, DeviceStatus, OfficeSnapshot, RoomSlug } from "../../../../packages/contracts/src";
 import { DashboardChrome } from "../components/DashboardChrome";
 import {
   commandDevice,
@@ -7,10 +7,9 @@ import {
   getActivity,
   getOfficeClosingChecklist,
   shutdownOffice,
-  shutdownRoom,
-  updateAlert,
   withControlRetry,
 } from "../lib/api";
+import { formatKwh, formatWatts } from "../lib/format";
 import { useOfficeSnapshot } from "../hooks/useOfficeSnapshot";
 
 type OverviewProps = {
@@ -43,9 +42,11 @@ const ROOMS: Room[] = [
     drawValue: "150W",
     tally: "2 Fans, 3 Lights ON",
     devices: [
-      { id: "lighting", label: "Main Lighting", defaultOn: true },
-      { id: "accents", label: "Accent Lights", defaultOn: false },
-      { id: "fan1", label: "Ceiling Fan 1", defaultOn: true },
+      { id: "drawing-fan-1", label: "Fan 1", defaultOn: true },
+      { id: "drawing-fan-2", label: "Fan 2", defaultOn: true },
+      { id: "drawing-light-1", label: "Light 1", defaultOn: true },
+      { id: "drawing-light-2", label: "Light 2", defaultOn: true },
+      { id: "drawing-light-3", label: "Light 3", defaultOn: true },
     ],
   },
   {
@@ -55,11 +56,14 @@ const ROOMS: Room[] = [
     status: "active",
     icon: "meeting_room",
     drawLabel: "Current Draw",
-    drawValue: "210W",
-    tally: "4 Workstations, 2 Displays ON",
+    drawValue: "150W",
+    tally: "2 Fans, 3 Lights ON",
     devices: [
-      { id: "ws-a", label: "Workstation Group A", defaultOn: true },
-      { id: "display", label: "Display Screen 1", defaultOn: true },
+      { id: "work1-fan-1", label: "Fan 1", defaultOn: true },
+      { id: "work1-fan-2", label: "Fan 2", defaultOn: true },
+      { id: "work1-light-1", label: "Light 1", defaultOn: true },
+      { id: "work1-light-2", label: "Light 2", defaultOn: true },
+      { id: "work1-light-3", label: "Light 3", defaultOn: true },
     ],
   },
   {
@@ -70,9 +74,15 @@ const ROOMS: Room[] = [
     icon: "meeting_room",
     drawLabel: "Standby Draw",
     drawValue: "5W",
-    tally: "All devices OFF/Standby",
+    tally: "0 Fans, 3 Lights ON",
     inactive: true,
-    devices: [{ id: "ws-b", label: "Workstation Group B", defaultOn: false }],
+    devices: [
+      { id: "work2-fan-1", label: "Fan 1", defaultOn: false },
+      { id: "work2-fan-2", label: "Fan 2", defaultOn: false },
+      { id: "work2-light-1", label: "Light 1", defaultOn: true },
+      { id: "work2-light-2", label: "Light 2", defaultOn: true },
+      { id: "work2-light-3", label: "Light 3", defaultOn: true },
+    ],
   },
 ];
 
@@ -93,24 +103,6 @@ const FALLBACK_ACTIVITY = [
     time: "08:00 AM",
     message: "Scheduled Mode: 'Daytime Operations' activated.",
     actor: "Schedule",
-  },
-];
-
-const FALLBACK_ALERTS = [
-  {
-    title: "Policy Violation",
-    time: "10 mins ago",
-    body: "Work Room 1: Device ON after 5 PM outside scheduled hours.",
-    actions: [
-      { label: "Acknowledge", variant: "outline" },
-      { label: "Turn Off", variant: "solid" },
-    ],
-  },
-  {
-    title: "High Usage",
-    time: "1 hr ago",
-    body: "Drawing Room power draw exceeding expected baseline by 15%.",
-    actions: [{ label: "Dismiss", variant: "outline" }],
   },
 ];
 
@@ -169,15 +161,6 @@ function formatClock(value: string): string {
   return new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-function formatAlertTime(value: string): string {
-  const elapsed = Date.now() - new Date(value).getTime();
-  const minutes = Math.max(0, Math.round(elapsed / 60000));
-  if (minutes < 1) return "now";
-  if (minutes < 60) return `${minutes} mins ago`;
-  const hours = Math.round(minutes / 60);
-  return `${hours} hr${hours === 1 ? "" : "s"} ago`;
-}
-
 function roomIcon(slug: RoomSlug): string {
   return slug === "drawing" ? "chair" : "meeting_room";
 }
@@ -194,7 +177,7 @@ function buildRooms(snapshotRooms: OfficeSnapshot["rooms"] | undefined): Room[] 
       status: room.activeDeviceCount > 0 ? "active" : "standby",
       icon: roomIcon(room.room.slug),
       drawLabel: room.activeDeviceCount > 0 ? "Current Draw" : "Standby Draw",
-      drawValue: `${room.powerWatts}W`,
+      drawValue: formatWatts(room.powerWatts),
       tally: `${fansOn} Fans, ${lightsOn} Lights ON`,
       inactive: room.activeDeviceCount === 0,
       devices: room.devices.map((device) => ({
@@ -208,17 +191,25 @@ function buildRooms(snapshotRooms: OfficeSnapshot["rooms"] | undefined): Room[] 
 }
 
 export function Overview({ onExit }: OverviewProps) {
-  const { snapshot, refresh } = useOfficeSnapshot();
+  const { snapshot, error: snapshotError, refresh } = useOfficeSnapshot();
   const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [alertError, setAlertError] = useState<string | null>(null);
-  const [hiddenAlertIds, setHiddenAlertIds] = useState<Set<string>>(() => new Set());
+  const [optimisticStatus, setOptimisticStatus] = useState<Record<string, DeviceStatus>>({});
   const [checklist, setChecklist] = useState<{
     rooms: Array<{ roomId: RoomSlug; devicesOn: number; alerts: number; readyToClose: boolean }>;
     readyToClose: boolean;
   } | null>(null);
-  const rooms = useMemo(() => buildRooms(snapshot?.rooms), [snapshot]);
-  const alerts = (snapshot?.alerts ?? []).filter((alert) => alert.status === "active" && !hiddenAlertIds.has(alert.id));
+  const rooms = useMemo(() => {
+    const built = buildRooms(snapshot?.rooms);
+    return built.map((room) => ({
+      ...room,
+      devices: room.devices.map((device) => ({
+        ...device,
+        status: optimisticStatus[device.id] ?? device.status,
+        defaultOn: optimisticStatus[device.id] ? optimisticStatus[device.id] === "on" : device.defaultOn,
+      })),
+    }));
+  }, [optimisticStatus, snapshot]);
 
   useEffect(() => {
     getActivity()
@@ -231,25 +222,16 @@ export function Overview({ onExit }: OverviewProps) {
 
   const toggleDevice = async (deviceId: DeviceKey, next: boolean) => {
     setBusyId(deviceId);
+    setOptimisticStatus((prev) => ({ ...prev, [deviceId]: next ? "on" : "off" }));
     try {
       await withControlRetry(() => commandDevice(deviceId, next ? "on" : "off"));
       await refresh();
     } finally {
       setBusyId(null);
-    }
-  };
-
-  const handleAlertAction = async (alert: Alert, action: "acknowledge" | "resolve" | "snooze" | "mute") => {
-    setBusyId(alert.id);
-    setAlertError(null);
-    try {
-      await withControlRetry(() => updateAlert(alert.id, action));
-      setHiddenAlertIds((current) => new Set(current).add(alert.id));
-      await refresh();
-    } catch (cause) {
-      setAlertError(cause instanceof Error ? cause.message : "Unable to update alert. Confirm the control PIN and try again.");
-    } finally {
-      setBusyId(null);
+      setOptimisticStatus((prev) => {
+        const { [deviceId]: _device, ...rest } = prev;
+        return rest;
+      });
     }
   };
 
@@ -263,21 +245,6 @@ export function Overview({ onExit }: OverviewProps) {
     }
   };
 
-  const shutdownAlertRoom = async (alert: Alert) => {
-    if (!alert.roomId) return;
-    setBusyId(alert.id);
-    setAlertError(null);
-    try {
-      await withControlRetry(() => shutdownRoom(alert.roomId!));
-      setHiddenAlertIds((current) => new Set(current).add(alert.id));
-      await refresh();
-    } catch (cause) {
-      setAlertError(cause instanceof Error ? cause.message : "Unable to turn off room devices. Confirm the control PIN and try again.");
-    } finally {
-      setBusyId(null);
-    }
-  };
-
   const topNavCenter = snapshot ? (
     <>
       <div className="flex flex-col items-end gap-1">
@@ -285,7 +252,7 @@ export function Overview({ onExit }: OverviewProps) {
           Total Office Power
         </span>
         <span className="font-metric-lg text-metric-lg gradient-sunset">
-          {snapshot.energy.totalPowerWatts}W
+          {formatWatts(snapshot.energy.totalPowerWatts)}
         </span>
       </div>
       <div className="h-8 w-px bg-border-subtle" />
@@ -294,7 +261,7 @@ export function Overview({ onExit }: OverviewProps) {
           Today
         </span>
         <span className="font-metric-lg text-metric-lg gradient-sunset">
-          {snapshot.energy.todayKwh} kWh
+          {formatKwh(snapshot.energy.todayKwh)}
         </span>
       </div>
     </>
@@ -303,7 +270,7 @@ export function Overview({ onExit }: OverviewProps) {
   return (
     <DashboardChrome active="overview" onExit={onExit} topNavCenter={topNavCenter}>
       {/* Main Content */}
-      <main className="pt-20 md:pl-64 md:h-screen md:overflow-hidden flex flex-col md:flex-row">
+      <main className="pt-20 md:pl-64 md:h-screen md:overflow-hidden flex flex-col">
         {/* Center canvas */}
         <div className="flex-1 md:min-h-0 p-4 md:p-8 lg:p-12 flex flex-col gap-8 md:overflow-y-auto custom-scrollbar">
           <header className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-border-subtle pb-4 shrink-0">
@@ -314,6 +281,11 @@ export function Overview({ onExit }: OverviewProps) {
               <p className="font-body-base text-body-base text-text-secondary mt-1">
                 Real-time power distribution and active device status across all primary zones.
               </p>
+              {snapshotError && (
+                <p className="font-body-sm text-body-sm text-[#FF9D63] mt-2">
+                  Showing fallback device layout until live office data loads.
+                </p>
+              )}
             </div>
           </header>
 
@@ -496,111 +468,6 @@ export function Overview({ onExit }: OverviewProps) {
           </section>
         </div>
 
-        {/* Right Alerts Panel */}
-        <aside className="w-full md:w-96 md:min-h-0 bg-surface-panel border-l border-border-subtle flex flex-col md:overflow-hidden">
-          <div className="shrink-0 p-4 border-b border-border-subtle flex justify-between items-center  backdrop-blur-[20px] z-10">
-            <h2 className="font-headline-md text-headline-md text-text-primary flex items-center gap-3">
-              <span className="material-symbols-outlined">warning</span>
-              Active Alerts
-            </h2>
-            <span className="font-label-caps text-label-caps bg-[#FF9D63] border border-[#FF9D63] text-black px-3 py-1 rounded-full">
-              {alerts.length || FALLBACK_ALERTS.length}
-            </span>
-          </div>
-          <div className="flex-1 md:min-h-0 p-4 space-y-4 md:overflow-y-auto custom-scrollbar">
-            {alertError && (
-              <p className="font-body-sm text-body-sm text-[#FF9D63] border border-[#FF9D63]/40 bg-[#FF9D63]/10 rounded-lg px-3 py-2">
-                {alertError}
-              </p>
-            )}
-            {(alerts.length > 0 ? alerts : []).map((alert) => (
-              <div
-                key={alert.id}
-                className="bg-surface-panel border border-border-subtle rounded-lg p-3"
-              >
-                <div className="flex justify-between items-start gap-3 mb-1">
-                  <span className="font-label-caps text-label-caps text-text-primary uppercase font-bold min-w-0 break-words">
-                    {alert.title}
-                  </span>
-                  <span className="font-metric-lg text-metric-lg text-text-secondary shrink-0">
-                    {formatAlertTime(alert.createdAt)}
-                  </span>
-                </div>
-                <p className="font-body-sm text-body-sm text-text-secondary mb-3">
-                  {alert.message}
-                </p>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    disabled={busyId === alert.id}
-                    onClick={() => handleAlertAction(alert, "acknowledge")}
-                    className="w-full bg-surface-panel text-[#FF9D63] border border-[#FF9D63] px-2 py-2 rounded text-xs font-label-caps uppercase hover:bg-[#FF9D63]/10 transition-colors disabled:opacity-50"
-                  >
-                    Acknowledge
-                  </button>
-                  <button
-                    type="button"
-                    disabled={busyId === alert.id}
-                    onClick={() => (alert.roomId ? shutdownAlertRoom(alert) : handleAlertAction(alert, "resolve"))}
-                    className="w-full bg-[#FF9D63] text-black px-2 py-2 rounded text-xs font-label-caps uppercase hover:opacity-90 transition-opacity disabled:opacity-50"
-                  >
-                    {alert.roomId ? "Turn Off" : "Resolve"}
-                  </button>
-                  <button
-                    type="button"
-                    disabled={busyId === alert.id}
-                    onClick={() => handleAlertAction(alert, "snooze")}
-                    className="w-full bg-surface-panel text-text-secondary border border-border-subtle px-2 py-2 rounded text-xs font-label-caps uppercase hover:text-[#FF9D63] hover:border-[#FF9D63]/50 transition-colors disabled:opacity-50"
-                  >
-                    Snooze
-                  </button>
-                  <button
-                    type="button"
-                    disabled={busyId === alert.id}
-                    onClick={() => handleAlertAction(alert, "mute")}
-                    className="w-full bg-surface-panel text-text-secondary border border-border-subtle px-2 py-2 rounded text-xs font-label-caps uppercase hover:text-[#FF9D63] hover:border-[#FF9D63]/50 transition-colors disabled:opacity-50"
-                  >
-                    Mute
-                  </button>
-                </div>
-              </div>
-            ))}
-            {alerts.length === 0 &&
-              FALLBACK_ALERTS.map((alert) => (
-                <div
-                  key={alert.title}
-                  className="bg-surface-panel border border-border-subtle rounded-lg p-3"
-                >
-                  <div className="flex justify-between items-start mb-1">
-                    <span className="font-label-caps text-label-caps text-text-primary uppercase font-bold">
-                      {alert.title}
-                    </span>
-                    <span className="font-metric-lg text-metric-lg text-text-secondary">
-                      {alert.time}
-                    </span>
-                  </div>
-                  <p className="font-body-sm text-body-sm text-text-secondary mb-3">
-                    {alert.body}
-                  </p>
-                  <div className="flex gap-3">
-                    {alert.actions.map((action) => (
-                      <button
-                        key={action.label}
-                        type="button"
-                        className={
-                          action.variant === "solid"
-                            ? "bg-[#FF9D63] text-black px-3 py-1 rounded text-xs font-label-caps uppercase hover:opacity-90 transition-opacity"
-                            : "bg-surface-panel text-[#FF9D63] border border-[#FF9D63] px-3 py-1 rounded text-xs font-label-caps uppercase hover:bg-[#FF9D63]/10 transition-colors"
-                        }
-                      >
-                        {action.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ))}
-          </div>
-        </aside>
       </main>
     </DashboardChrome>
   );

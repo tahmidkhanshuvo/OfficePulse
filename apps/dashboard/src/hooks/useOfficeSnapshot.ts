@@ -21,8 +21,12 @@ export function useOfficeSnapshot() {
 
   useEffect(() => {
     refresh();
-    const timer = window.setInterval(refresh, 15000);
-    return () => window.clearInterval(timer);
+    const timer = window.setInterval(refresh, 2500);
+    window.addEventListener("focus", refresh);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refresh);
+    };
   }, [refresh]);
 
   return { snapshot, loading, error, refresh };

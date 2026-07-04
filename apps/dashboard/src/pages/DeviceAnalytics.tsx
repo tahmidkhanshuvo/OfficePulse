@@ -1,16 +1,17 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { DashboardChrome } from "../components/DashboardChrome";
 import type { ActivityItem, RoomSlug } from "../../../../packages/contracts/src";
 import {
   getBillForecast,
   getDeviceHistory,
   getDeviceMaintenance,
+  getDeviceTelemetry,
   getDeviceUsage,
   getEnergyCarbon,
-  getEnergyHistory,
   getEnergyRankings,
   getEnergySavings,
 } from "../lib/api";
+import { formatHours, formatKwh, formatNumber, formatWatts } from "../lib/format";
 import { useOfficeSnapshot } from "../hooks/useOfficeSnapshot";
 
 type DeviceAnalyticsProps = {
@@ -18,8 +19,6 @@ type DeviceAnalyticsProps = {
 };
 
 const BAR_PCT = [20, 50, 90, 30, 10, 60, 40];
-
-const TIME_LABELS = ["08:00", "12:00", "16:00"];
 
 function Icon({ name }: { name: string }) {
   return (
@@ -29,9 +28,45 @@ function Icon({ name }: { name: string }) {
   );
 }
 
-function deviceDisplayName(device: { roomId: string; label: string } | undefined): string {
-  if (!device) return "Work Room 1 - Light 2";
-  return `${device.roomId} - ${device.label}`;
+function formatDeviceName(device: { roomId: string; label: string } | undefined): string {
+  if (!device) return "Loading devices";
+  const roomName = device.roomId === "drawing" ? "Drawing Room" : device.roomId === "work1" ? "Work Room 1" : "Work Room 2";
+  return `${roomName} - ${device.label}`;
+}
+
+function buildLinePath(values: number[]) {
+  if (values.length === 0) return { area: "", line: "", points: [] as Array<{ x: number; y: number }> };
+  const max = Math.max(...values, 1);
+  const min = Math.min(...values);
+  const range = Math.max(max - min, 0.01);
+  const points = values.map((value, index) => ({
+    x: values.length === 1 ? 50 : (index / (values.length - 1)) * 100,
+    y: max - min <= max * 0.25
+      ? 68 - ((value - min) / range) * 36
+      : 90 - (value / max) * 75,
+  }));
+
+  if (points.length === 1) {
+    const line = `M0,${points[0].y.toFixed(2)} L100,${points[0].y.toFixed(2)}`;
+    return {
+      line,
+      area: `${line} L100,100 L0,100 Z`,
+      points,
+    };
+  }
+
+  const line = points.reduce((path, point, index) => {
+    if (index === 0) return `M${point.x.toFixed(2)},${point.y.toFixed(2)}`;
+    const previous = points[index - 1];
+    const controlX = previous.x + (point.x - previous.x) / 2;
+    return `${path} C${controlX.toFixed(2)},${previous.y.toFixed(2)} ${controlX.toFixed(2)},${point.y.toFixed(2)} ${point.x.toFixed(2)},${point.y.toFixed(2)}`;
+  }, "");
+
+  return {
+    line,
+    area: `${line} L100,100 L0,100 Z`,
+    points,
+  };
 }
 
 export function DeviceAnalytics({ onExit }: DeviceAnalyticsProps) {
@@ -46,8 +81,12 @@ export function DeviceAnalytics({ onExit }: DeviceAnalyticsProps) {
     powerWatts: number;
     todayKwh: number;
     estimatedCostToday: number;
+    runtimeHours: number;
+    averagePowerWatts: number;
+    sampleCount: number;
   } | null>(null);
   const [historyBars, setHistoryBars] = useState(BAR_PCT);
+  const [telemetryPoints, setTelemetryPoints] = useState<Array<{ powerWatts: number; observedAt: string; status: string }>>([]);
   const [energyStats, setEnergyStats] = useState<{
     carbon?: { energyKwh: number; kgCo2e: number; factor: number };
     savings?: { estimatedKwhSaved: number; estimatedCostSaved: number; evidence: string };
@@ -75,17 +114,18 @@ export function DeviceAnalytics({ onExit }: DeviceAnalyticsProps) {
     getDeviceHistory(selectedDevice.id)
       .then((next) => setDeviceHistory(next.items.slice(-4).reverse()))
       .catch(() => setDeviceHistory([]));
-  }, [selectedDevice]);
-
-  useEffect(() => {
-    getEnergyHistory()
-      .then((history) => {
-        const max = Math.max(...history.points.map((point) => point.powerWatts), 1);
-        const points = history.points.map((point) => Math.max(8, Math.round((point.powerWatts / max) * 100)));
-        if (points.length > 0) setHistoryBars(points);
+    getDeviceTelemetry(selectedDevice.id, 48)
+      .then((next) => {
+        setTelemetryPoints(next.points);
+        const max = Math.max(...next.points.map((point) => point.powerWatts), 1);
+        const bars = next.points.slice(-12).map((point) => Math.max(4, Math.round((point.powerWatts / max) * 100)));
+        setHistoryBars(bars.length > 0 ? bars : BAR_PCT);
       })
-      .catch(() => setHistoryBars(BAR_PCT));
-  }, []);
+      .catch(() => {
+        setTelemetryPoints([]);
+        setHistoryBars(BAR_PCT);
+      });
+  }, [selectedDevice]);
 
   useEffect(() => {
     Promise.allSettled([getEnergyCarbon(), getEnergySavings(), getBillForecast(), getEnergyRankings()]).then(
@@ -99,6 +139,29 @@ export function DeviceAnalytics({ onExit }: DeviceAnalyticsProps) {
       },
     );
   }, []);
+
+  const lineValues = telemetryPoints.length > 0 ? telemetryPoints.map((point) => point.powerWatts) : historyBars;
+  const linePath = buildLinePath(lineValues);
+  const previousLineRef = useRef(linePath.line);
+  const previousAreaRef = useRef(linePath.area);
+  const previousLine = previousLineRef.current || linePath.line;
+  const previousArea = previousAreaRef.current || linePath.area;
+  const lastPoint = linePath.points.at(-1);
+  const peakPoint = linePath.points.length > 0
+    ? linePath.points.reduce((peak, point) => (point.y < peak.y ? point : peak), linePath.points[0])
+    : undefined;
+  const timeLabels = telemetryPoints.length > 1
+    ? [
+        telemetryPoints[0],
+        telemetryPoints[Math.floor(telemetryPoints.length / 2)],
+        telemetryPoints[telemetryPoints.length - 1],
+      ].map((point) => new Date(point.observedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }))
+    : ["Start", "Mid", "Now"];
+
+  useEffect(() => {
+    previousLineRef.current = linePath.line;
+    previousAreaRef.current = linePath.area;
+  }, [linePath.area, linePath.line]);
 
   return (
     <DashboardChrome active="analytics" onExit={onExit}>
@@ -116,7 +179,7 @@ export function DeviceAnalytics({ onExit }: DeviceAnalyticsProps) {
                     onClick={() => setDeviceMenuOpen((open) => !open)}
                     className="inline-flex items-center gap-2 border border-transparent rounded-md py-0 pl-0 pr-1 font-headline-md text-headline-md text-text-primary hover:border-border-subtle focus:border-[#FF9D63] focus:outline-none transition-colors"
                   >
-                    <span>{deviceDisplayName(selectedDevice)}</span>
+                    <span>{formatDeviceName(selectedDevice)}</span>
                     <span className="material-symbols-outlined text-[20px] text-text-secondary">
                       expand_more
                     </span>
@@ -145,7 +208,7 @@ export function DeviceAnalytics({ onExit }: DeviceAnalyticsProps) {
                             }
                           >
                             <span className="block font-body-base text-body-base">
-                              {deviceDisplayName(device)}
+                              {formatDeviceName(device)}
                             </span>
                             <span className="block font-label-caps text-label-caps uppercase">
                               {device.id}
@@ -158,12 +221,12 @@ export function DeviceAnalytics({ onExit }: DeviceAnalyticsProps) {
                 </div>
                 <span className="bg-surface-panel text-text-primary border border-border-subtle px-3 py-1 rounded-full font-label-caps text-label-caps flex items-center gap-1">
                   <span className="w-2 h-2 rounded-full bg-[#FF9D63] animate-pulse shadow-[0_0_8px_#FF9D63]" />
-                  {(selectedDevice?.state.status ?? "on").toUpperCase()}
+                  {(selectedDevice?.state.status ?? "unknown").toUpperCase()}
                 </span>
               </div>
               <p className="font-body-base text-body-base text-text-secondary flex items-center gap-1">
                 <span className="material-symbols-outlined text-[16px]">bolt</span>
-                Current Draw: {usage?.powerWatts ?? selectedDevice?.state.powerWatts ?? 15}W
+                Current Draw: {formatWatts(usage?.powerWatts ?? selectedDevice?.state.powerWatts ?? 15)}
               </p>
             </div>
           </section>
@@ -178,7 +241,7 @@ export function DeviceAnalytics({ onExit }: DeviceAnalyticsProps) {
                 Total Uptime Today
               </h3>
               <div className="font-metric-lg text-metric-lg text-text-primary tabular-nums tracking-tighter">
-                {selectedDevice?.state.status === "on" ? "8" : "0"}{" "}
+                {formatHours(usage?.runtimeHours)}{" "}
                 <span className="font-body-sm text-body-sm text-text-secondary ml-1">Hours</span>
               </div>
             </div>
@@ -192,7 +255,7 @@ export function DeviceAnalytics({ onExit }: DeviceAnalyticsProps) {
                 Energy Consumed Today
               </h3>
               <div className="font-metric-lg text-metric-lg text-text-primary tabular-nums tracking-tighter">
-                {usage?.todayKwh ?? "0.09"}{" "}
+                {formatNumber(usage?.todayKwh)}{" "}
                 <span className="font-body-sm text-body-sm text-text-secondary ml-1">kWh</span>
               </div>
             </div>
@@ -201,7 +264,7 @@ export function DeviceAnalytics({ onExit }: DeviceAnalyticsProps) {
           {/* Charts Section */}
           <section className="grid grid-cols-1 lg:grid-cols-12 gap-4 flex-1">
             {/* Usage Frequency Bar Chart */}
-            <div className="lg:col-span-4 bg-surface-panel backdrop-blur-xl p-4 rounded-xl border border-border-subtle flex flex-col">
+            <div className="lg:col-span-4 bg-surface-panel backdrop-blur-xl p-4 rounded-xl border border-border-subtle flex flex-col shadow-[0_12px_40px_rgba(0,0,0,0.18)]">
               <div className="flex justify-between items-center mb-4">
                 <h3 className="font-label-caps text-label-caps text-text-secondary">
                   Usage Frequency
@@ -210,35 +273,35 @@ export function DeviceAnalytics({ onExit }: DeviceAnalyticsProps) {
                   open_in_full
                 </span>
               </div>
-              <div className="flex-1 flex items-end gap-1 h-48 border-b border-border-subtle pb-1">
+              <div className="flex-1 flex items-end gap-2 h-48 border-b border-border-subtle pb-1">
                 {historyBars.map((pct, i) => {
                   const isPeak = pct === Math.max(...historyBars);
                   return (
                     <div
                       key={i}
-                      className={`w-full rounded-t-sm relative group transition-colors ${
+                      className={`w-full rounded-t-md relative group transition-all duration-500 ease-out ${
                         isPeak
-                          ? "bg-accent-orange shadow-[0_0_10px_rgba(255,157,99,0.3)] hover:opacity-90"
-                          : "bg-surface-container-high/50 hover:bg-surface-container-high"
+                          ? "bg-accent-orange shadow-[0_0_14px_rgba(255,157,99,0.35)] hover:opacity-95"
+                          : "bg-surface-container-high/40 hover:bg-surface-container-high/80"
                       }`}
-                      style={{ height: `${pct}%` }}
+                      style={{ height: `${pct}%`, transitionProperty: "height, background-color, opacity, box-shadow" }}
                     >
                       <div className="absolute -top-6 left-1/2 -translate-x-1/2 bg-surface-container-highest px-1 py-[2px] rounded text-[10px] hidden group-hover:block border border-border-subtle text-text-primary z-10">
-                        {pct}%
+                        {formatWatts(telemetryPoints.at(-(historyBars.length - i))?.powerWatts ?? pct)}
                       </div>
                     </div>
                   );
                 })}
               </div>
               <div className="flex justify-between mt-1 text-[10px] text-text-secondary font-label-caps text-label-caps">
-                {TIME_LABELS.map((t) => (
+                {timeLabels.map((t) => (
                   <span key={t}>{t}</span>
                 ))}
               </div>
             </div>
 
             {/* Energy Consumption Line Graph */}
-            <div className="lg:col-span-8 bg-surface-panel backdrop-blur-xl p-4 rounded-xl border border-border-subtle flex flex-col relative overflow-hidden">
+            <div className="lg:col-span-8 bg-surface-panel backdrop-blur-xl p-4 rounded-xl border border-border-subtle flex flex-col relative overflow-hidden shadow-[0_12px_40px_rgba(0,0,0,0.18)]">
               <div className="flex justify-between items-center mb-4 z-10">
                 <h3 className="font-label-caps text-label-caps text-text-secondary">
                   Energy Consumption (24h)
@@ -253,6 +316,12 @@ export function DeviceAnalytics({ onExit }: DeviceAnalyticsProps) {
                   preserveAspectRatio="none"
                   viewBox="0 0 100 100"
                 >
+                  <defs>
+                    <linearGradient id="analyticsArea" x1="0" x2="0" y1="0" y2="1">
+                      <stop offset="0%" stopColor="#FF9D63" stopOpacity="0.16" />
+                      <stop offset="100%" stopColor="#FF9D63" stopOpacity="0.02" />
+                    </linearGradient>
+                  </defs>
                   {/* Grid lines */}
                   <line
                     stroke="rgba(255,255,255,0.1)"
@@ -282,27 +351,31 @@ export function DeviceAnalytics({ onExit }: DeviceAnalyticsProps) {
                     y2="75"
                   />
 
-                  {/* Area fill */}
                   <path
-                    d="M0,80 Q10,70 20,75 T40,60 T60,80 T80,40 T100,50 L100,100 L0,100 Z"
-                    fill="#FF9D63"
-                    opacity="0.15"
-                  />
+                    d={linePath.area}
+                    fill="url(#analyticsArea)"
+                  >
+                    {previousArea !== linePath.area && (
+                      <animate attributeName="d" from={previousArea} to={linePath.area} dur="700ms" fill="freeze" calcMode="spline" keyTimes="0;1" keySplines="0.22 1 0.36 1" />
+                    )}
+                  </path>
 
-                  {/* Line */}
                   <path
-                    d="M0,80 Q10,70 20,75 T40,60 T60,80 T80,40 T100,50"
+                    d={linePath.line}
                     fill="none"
                     stroke="#FF9D63"
-                    strokeWidth="2.5"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
                     style={{ filter: "drop-shadow(0 0 6px rgba(255,157,99,0.5))" }}
-                  />
+                  >
+                    {previousLine !== linePath.line && (
+                      <animate attributeName="d" from={previousLine} to={linePath.line} dur="700ms" fill="freeze" calcMode="spline" keyTimes="0;1" keySplines="0.22 1 0.36 1" />
+                    )}
+                  </path>
 
-                  {/* Data points */}
-                  <circle cx="20" cy="75" fill="#FF9D63" r="2.5" />
-                  <circle cx="40" cy="60" fill="#FF9D63" r="2.5" />
-                  <circle cx="60" cy="80" fill="#FF9D63" r="2.5" />
-                  <circle cx="80" cy="40" fill="#FF9D63" r="2.5" />
+                  {peakPoint && <circle className="transition-all duration-700 ease-out" cx={peakPoint.x} cy={peakPoint.y} fill="#FF9D63" r="2" />}
+                  {lastPoint && <circle className="transition-all duration-700 ease-out" cx={lastPoint.x} cy={lastPoint.y} fill="#FF9D63" stroke="#0A0A0A" strokeWidth="1" r="2.5" />}
                 </svg>
               </div>
             </div>
@@ -312,26 +385,26 @@ export function DeviceAnalytics({ onExit }: DeviceAnalyticsProps) {
             <MetricPanel
               icon="co2"
               label="Carbon Today"
-              value={`${energyStats.carbon?.kgCo2e ?? "0.000"} kg`}
-              detail={`${energyStats.carbon?.energyKwh ?? 0} kWh tracked`}
+              value={`${formatNumber(energyStats.carbon?.kgCo2e)} kg`}
+              detail={`${formatKwh(energyStats.carbon?.energyKwh)} tracked`}
             />
             <MetricPanel
               icon="savings"
               label="Savings"
-              value={`${energyStats.savings?.estimatedKwhSaved ?? 0} kWh`}
+              value={formatKwh(energyStats.savings?.estimatedKwhSaved)}
               detail={energyStats.savings?.evidence ?? "No completed automation savings yet."}
             />
             <MetricPanel
               icon="payments"
               label="Bill Forecast"
-              value={`${energyStats.forecast?.monthEndCost ?? 0} ${energyStats.forecast?.currency ?? "BDT"}`}
+              value={`${formatNumber(energyStats.forecast?.monthEndCost)} ${energyStats.forecast?.currency ?? "BDT"}`}
               detail={energyStats.forecast?.confidence ?? "demo-estimate"}
             />
             <MetricPanel
               icon="health_and_safety"
               label="Maintenance"
               value={(maintenance?.status ?? "ok").toUpperCase()}
-              detail={`${maintenance?.runtimeHours ?? 0} runtime hours`}
+              detail={`${formatHours(maintenance?.runtimeHours)} runtime hours`}
             />
           </section>
 
@@ -347,7 +420,7 @@ export function DeviceAnalytics({ onExit }: DeviceAnalyticsProps) {
                       <div className="font-body-sm text-body-sm text-text-primary">{device.label}</div>
                       <div className="font-label-caps text-label-caps text-text-secondary uppercase">{device.roomId}</div>
                     </div>
-                    <div className="font-metric-lg text-metric-lg text-[#FF9D63]">{device.powerWatts}W</div>
+                    <div className="font-metric-lg text-metric-lg text-[#FF9D63]">{formatWatts(device.powerWatts)}</div>
                   </div>
                 ))}
               </div>

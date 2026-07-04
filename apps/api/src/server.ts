@@ -9,13 +9,30 @@ import {
 } from "../../../packages/auth/src";
 import { loadConfig } from "../../../packages/config/src";
 import type { ApiEnvelope, ApiErrorEnvelope } from "../../../packages/contracts/src";
-import { buildOfficeSnapshot, buildUsageRankings, InMemoryOfficeRepository } from "../../../packages/domain/src";
+import { createPersistentOfficeRepository } from "../../../packages/db/src";
+import { buildOfficeSnapshot, buildUsageRankings } from "../../../packages/domain/src";
 import { createLogger } from "../../../packages/logger/src";
 import { checkRedisHealth } from "../../../packages/redis/src";
+import { DeviceTelemetryGenerator } from "./device-telemetry-generator";
 
 const config = loadConfig();
 const logger = createLogger("api");
-const office = new InMemoryOfficeRepository();
+const snapshotOptions = {
+  currency: config.currency,
+  tariffPerKwh: config.defaultTariffPerKwh,
+  timezone: config.timezone,
+  publicWsUrl: config.publicWsUrl,
+  platformAuthenticated: false,
+  controlAuthorized: false
+};
+const office = await createPersistentOfficeRepository({
+  databaseUrl: config.databaseDirectUrl || config.databaseUrl,
+  redisUrl: config.redisUrl,
+  snapshotOptions,
+  logger
+});
+const telemetryGenerator = new DeviceTelemetryGenerator(office);
+telemetryGenerator.warmStartFromCurrentState();
 const sessions = new InMemorySessionStore({
   ttlSeconds: config.platformSessionTtlSeconds,
   idleTimeoutSeconds: config.platformIdleTimeoutSeconds,
@@ -97,12 +114,93 @@ function error(
   });
 }
 
+function fileResponse(
+  context: RequestContext,
+  body: BodyInit,
+  contentType: string,
+  filename: string
+): Response {
+  return new Response(body, {
+    headers: withCors(context.request, {
+      "content-type": contentType,
+      "content-disposition": `attachment; filename="${filename}"`
+    })
+  });
+}
+
+function escapePdfText(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
+}
+
+function createSimplePdf(lines: string[]): ArrayBuffer {
+  const content = [
+    "BT",
+    "/F1 14 Tf",
+    "50 780 Td",
+    ...lines.flatMap((line, index) => [
+      index === 0 ? "" : "0 -22 Td",
+      `(${escapePdfText(line)}) Tj`
+    ]).filter(Boolean),
+    "ET"
+  ].join("\n");
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    `<< /Length ${content.length} >>\nstream\n${content}\nendstream`
+  ];
+  let pdf = "%PDF-1.4\n";
+  const offsets = [0];
+  for (const [index, object] of objects.entries()) {
+    offsets.push(pdf.length);
+    pdf += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  }
+  const xrefOffset = pdf.length;
+  pdf += `xref\n0 ${objects.length + 1}\n`;
+  pdf += "0000000000 65535 f \n";
+  for (const offset of offsets.slice(1)) {
+    pdf += `${String(offset).padStart(10, "0")} 00000 n \n`;
+  }
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+  const bytes = new TextEncoder().encode(pdf);
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+}
+
+function reportFile(context: RequestContext, format: "csv" | "pdf", filename: string): Response {
+  const current = snapshot(context);
+  if (format === "csv") {
+    const lines = [
+      "room_id,room_name,power_watts,active_device_count,alert_count",
+      ...current.rooms.map((room) =>
+        [
+          room.room.slug,
+          room.room.name,
+          room.powerWatts,
+          room.activeDeviceCount,
+          room.alerts.length
+        ].join(",")
+      )
+    ];
+    return fileResponse(context, `${lines.join("\n")}\n`, "text/csv; charset=utf-8", filename);
+  }
+
+  const text = [
+    "OfficePulse Report",
+    `Generated At: ${current.generatedAt}`,
+    `Total Power Watts: ${current.energy.totalPowerWatts}`,
+    `Today kWh: ${current.energy.todayKwh}`,
+    `Estimated Cost Today: ${current.energy.estimatedCostToday} ${current.energy.currency}`,
+    `Active Alerts: ${current.alerts.length}`,
+    "",
+    ...current.rooms.map((room) => `${room.room.name}: ${room.powerWatts}W, ${room.activeDeviceCount} active devices`)
+  ];
+  return fileResponse(context, createSimplePdf(text), "application/pdf", filename);
+}
+
 function snapshot(context: RequestContext) {
   return buildOfficeSnapshot(office, {
-    currency: config.currency,
-    tariffPerKwh: config.defaultTariffPerKwh,
-    timezone: config.timezone,
-    publicWsUrl: config.publicWsUrl,
+    ...snapshotOptions,
     platformAuthenticated: Boolean(context.session),
     controlAuthorized: context.controlAuthorized
   });
@@ -379,13 +477,26 @@ async function route(context: RequestContext): Promise<Response> {
   if (method === "GET" && deviceUsageMatch) {
     const device = snapshot(context).devices.find((candidate) => candidate.id === deviceUsageMatch[1]);
     if (!device) return error(context, 404, "DEVICE_NOT_FOUND", "Device not found.", { deviceId: deviceUsageMatch[1] });
-    const todayKwh = Number(((device.state.powerWatts * 8) / 1000).toFixed(3));
+    const persistedUsage = await office.getDeviceUsageToday(device.id);
+    const todayKwh = persistedUsage?.todayKwh ?? Number(((device.state.powerWatts * 8) / 1000).toFixed(3));
     return json(context, {
       deviceId: device.id,
       powerWatts: device.state.powerWatts,
       todayKwh,
-      estimatedCostToday: Number((todayKwh * config.defaultTariffPerKwh).toFixed(2))
+      estimatedCostToday: Number((todayKwh * config.defaultTariffPerKwh).toFixed(2)),
+      runtimeHours: persistedUsage?.runtimeHours ?? (device.state.status === "on" ? 8 : 0),
+      averagePowerWatts: persistedUsage?.averagePowerWatts ?? device.state.powerWatts,
+      sampleCount: persistedUsage?.sampleCount ?? 0
     });
+  }
+
+  const deviceTelemetryMatch = path.match(/^\/api\/v1\/devices\/([^/]+)\/telemetry$/);
+  if (method === "GET" && deviceTelemetryMatch) {
+    const device = snapshot(context).devices.find((candidate) => candidate.id === deviceTelemetryMatch[1]);
+    if (!device) return error(context, 404, "DEVICE_NOT_FOUND", "Device not found.", { deviceId: deviceTelemetryMatch[1] });
+    const limit = Math.min(Math.max(Number(url.searchParams.get("limit") ?? 48), 1), 200);
+    const points = await office.getDeviceTelemetry(device.id, limit);
+    return json(context, { deviceId: device.id, points });
   }
 
   const deviceHistoryMatch = path.match(/^\/api\/v1\/devices\/([^/]+)\/history$/);
@@ -419,6 +530,7 @@ async function route(context: RequestContext): Promise<Response> {
     }
     const state = office.updateDeviceState(commandMatch[1], action, "api");
     if (!state) return error(context, 404, "DEVICE_NOT_FOUND", "Device not found.", { deviceId: commandMatch[1] });
+    telemetryGenerator.syncDevice(commandMatch[1], action);
     return json(
       context,
       {
@@ -438,19 +550,24 @@ async function route(context: RequestContext): Promise<Response> {
     if (controlError) return controlError;
     const command = office.shutdownRoom(roomShutdownMatch[1] as never, "Room shutdown requested", "dashboard");
     if (!command) return error(context, 404, "ROOM_NOT_FOUND", "Room not found.", { roomId: roomShutdownMatch[1] });
+    telemetryGenerator.syncRoom(roomShutdownMatch[1], "off");
     return json(context, command, { status: 202 });
   }
 
   if (method === "POST" && path === "/api/v1/office/commands/shutdown") {
     const controlError = requireControl(context);
     if (controlError) return controlError;
-    return json(context, office.shutdownOffice("Office shutdown requested", "dashboard"), { status: 202 });
+    const command = office.shutdownOffice("Office shutdown requested", "dashboard");
+    telemetryGenerator.syncOffice("off");
+    return json(context, command, { status: 202 });
   }
 
   if (method === "POST" && path === "/api/v1/office/commands/emergency-shutdown") {
     const controlError = requireControl(context);
     if (controlError) return controlError;
-    return json(context, office.shutdownOffice("Emergency shutdown requested", "dashboard"), { status: 202 });
+    const command = office.shutdownOffice("Emergency shutdown requested", "dashboard");
+    telemetryGenerator.syncOffice("off");
+    return json(context, command, { status: 202 });
   }
 
   if (method === "GET" && path === "/api/v1/occupancy") {
@@ -486,9 +603,10 @@ async function route(context: RequestContext): Promise<Response> {
 
   if (method === "GET" && path === "/api/v1/energy/history") {
     const current = snapshot(context);
+    const persistedPoints = await office.getEnergyHistoryPoints(48);
     return json(context, {
       granularity: "hour",
-      points: [
+      points: persistedPoints.length > 0 ? persistedPoints : [
         {
           recordedAt: current.generatedAt,
           powerWatts: current.energy.totalPowerWatts,
@@ -574,32 +692,15 @@ async function route(context: RequestContext): Promise<Response> {
 
   const reportDownloadMatch = path.match(/^\/api\/v1\/reports\/downloads\/(csv|pdf)\/latest$/);
   if (method === "GET" && reportDownloadMatch) {
-    const current = snapshot(context);
-    if (reportDownloadMatch[1] === "csv") {
-      const lines = [
-        "room_id,room_name,power_watts,active_device_count,alert_count",
-        ...current.rooms.map((room) =>
-          [
-            room.room.slug,
-            room.room.name,
-            room.powerWatts,
-            room.activeDeviceCount,
-            room.alerts.length
-          ].join(",")
-        )
-      ];
-      return fileResponse(context, `${lines.join("\n")}\n`, "text/csv; charset=utf-8", "officepulse-report.csv");
-    }
+    const format = reportDownloadMatch[1] as "csv" | "pdf";
+    return reportFile(context, format, `officepulse-report.${format}`);
+  }
 
-    const text = [
-      "OfficePulse Report",
-      `Generated At: ${current.generatedAt}`,
-      `Total Power Watts: ${current.energy.totalPowerWatts}`,
-      `Today kWh: ${current.energy.todayKwh}`,
-      `Estimated Cost Today: ${current.energy.estimatedCostToday} ${current.energy.currency}`,
-      `Active Alerts: ${current.alerts.length}`
-    ].join("\n");
-    return fileResponse(context, text, "application/pdf", "officepulse-report.pdf");
+  const reportFileMatch = path.match(/^\/api\/v1\/reports\/([^/]+)\/download$/);
+  if (method === "GET" && reportFileMatch) {
+    const report = office.getReports().find((item) => item.id === reportFileMatch[1]);
+    if (!report) return error(context, 404, "REPORT_NOT_FOUND", "Report not found.", { reportId: reportFileMatch[1] });
+    return reportFile(context, report.format, `${report.id}.${report.format}`);
   }
 
   const reportMatch = path.match(/^\/api\/v1\/reports\/([^/]+)$/);

@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import type { OccupancyState, RoomSlug } from "../../../../packages/contracts/src";
+import { useMemo, useState } from "react";
+import type { DeviceStatus, OccupancyState, RoomSlug } from "../../../../packages/contracts/src";
 import { DashboardChrome } from "../components/DashboardChrome";
 import { commandDevice, withControlRetry } from "../lib/api";
 import { useOfficeSnapshot } from "../hooks/useOfficeSnapshot";
@@ -9,20 +9,6 @@ type MapProps = {
 };
 
 type RoomId = "drawing" | "work1" | "work2";
-
-type LightState = Record<RoomId, boolean[]>;
-type FanState = Record<RoomId, boolean[]>;
-
-const INITIAL_LIGHTS: LightState = {
-  drawing: [true, true, true],
-  work1: [false, false, false],
-  work2: [true, true, true],
-};
-const INITIAL_FANS: FanState = {
-  drawing: [true, true],
-  work1: [false, false],
-  work2: [true, true],
-};
 
 const lightId = (room: RoomId, idx: number) => `${room}-light-${idx + 1}`;
 const fanId = (room: RoomId, idx: number) => `${room}-fan-${idx + 1}`;
@@ -60,63 +46,51 @@ function LightDot({
 
 export function Map({ onExit }: MapProps) {
   const { snapshot, refresh } = useOfficeSnapshot();
-  const [lights, setLights] = useState<LightState>(INITIAL_LIGHTS);
-  const [fans, setFans] = useState<FanState>(INITIAL_FANS);
+  const [optimisticStatus, setOptimisticStatus] = useState<Record<string, DeviceStatus>>({});
   const [busyDevice, setBusyDevice] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!snapshot) return;
-    setLights({
-      drawing: [0, 1, 2].map((idx) => snapshot.devices.find((device) => device.id === lightId("drawing", idx))?.state.status === "on"),
-      work1: [0, 1, 2].map((idx) => snapshot.devices.find((device) => device.id === lightId("work1", idx))?.state.status === "on"),
-      work2: [0, 1, 2].map((idx) => snapshot.devices.find((device) => device.id === lightId("work2", idx))?.state.status === "on"),
-    });
-    setFans({
-      drawing: [0, 1].map((idx) => snapshot.devices.find((device) => device.id === fanId("drawing", idx))?.state.status === "on"),
-      work1: [0, 1].map((idx) => snapshot.devices.find((device) => device.id === fanId("work1", idx))?.state.status === "on"),
-      work2: [0, 1].map((idx) => snapshot.devices.find((device) => device.id === fanId("work2", idx))?.state.status === "on"),
-    });
-  }, [snapshot]);
+  const deviceStatus = (deviceId: string): DeviceStatus =>
+    optimisticStatus[deviceId] ??
+    snapshot?.devices.find((device) => device.id === deviceId)?.state.status ??
+    "unknown";
+
+  const deviceIsOn = (deviceId: string) => deviceStatus(deviceId) === "on";
 
   const toggleLight = async (room: RoomId, idx: number) => {
     const deviceId = lightId(room, idx);
-    const next = !lights[room][idx];
+    const next = !deviceIsOn(deviceId);
     setBusyDevice(deviceId);
-    setLights((prev) => ({
-      ...prev,
-      [room]: prev[room].map((v, i) => (i === idx ? next : v)),
-    }));
+    setOptimisticStatus((prev) => ({ ...prev, [deviceId]: next ? "on" : "off" }));
     try {
       await withControlRetry(() => commandDevice(deviceId, next ? "on" : "off"));
       await refresh();
     } catch {
-      setLights((prev) => ({
-        ...prev,
-        [room]: prev[room].map((v, i) => (i === idx ? !next : v)),
-      }));
+      setOptimisticStatus((prev) => ({ ...prev, [deviceId]: next ? "off" : "on" }));
     } finally {
       setBusyDevice(null);
+      setOptimisticStatus((prev) => {
+        const { [deviceId]: _device, ...rest } = prev;
+        return rest;
+      });
     }
   };
 
   const toggleFan = async (room: RoomId, idx: number) => {
     const deviceId = fanId(room, idx);
-    const next = !fans[room][idx];
+    const next = !deviceIsOn(deviceId);
     setBusyDevice(deviceId);
-    setFans((prev) => ({
-      ...prev,
-      [room]: prev[room].map((v, i) => (i === idx ? next : v)),
-    }));
+    setOptimisticStatus((prev) => ({ ...prev, [deviceId]: next ? "on" : "off" }));
     try {
       await withControlRetry(() => commandDevice(deviceId, next ? "on" : "off"));
       await refresh();
     } catch {
-      setFans((prev) => ({
-        ...prev,
-        [room]: prev[room].map((v, i) => (i === idx ? !next : v)),
-      }));
+      setOptimisticStatus((prev) => ({ ...prev, [deviceId]: next ? "off" : "on" }));
     } finally {
       setBusyDevice(null);
+      setOptimisticStatus((prev) => {
+        const { [deviceId]: _device, ...rest } = prev;
+        return rest;
+      });
     }
   };
 
@@ -236,28 +210,28 @@ export function Map({ onExit }: MapProps) {
                 <div className="plant right-6 bottom-[9%]" />
                 {/* Devices */}
                 <LightDot
-                  active={lights.drawing[0]}
+                  active={deviceIsOn(lightId("drawing", 0))}
                   onClick={() => toggleLight("drawing", 0)}
                   className={`top-[15%] left-[20%] ${busyDevice === lightId("drawing", 0) ? "opacity-50" : ""}`}
                 />
                 <LightDot
-                  active={lights.drawing[1]}
+                  active={deviceIsOn(lightId("drawing", 1))}
                   onClick={() => toggleLight("drawing", 1)}
                   className={`top-[15%] right-[20%] ${busyDevice === lightId("drawing", 1) ? "opacity-50" : ""}`}
                 />
                 {/* Fans */}
                 <button type="button" onClick={() => toggleFan("drawing", 0)} aria-label="Toggle Drawing Room Fan 1" className="absolute top-[15%] left-[50%] -translate-x-1/2 w-8 h-8 flex items-center justify-center z-20 hover:scale-110 transition-transform">
-                  <span className={`material-symbols-outlined text-white text-[32px] drop-shadow-md ${fans.drawing[0] ? "spin-slow opacity-80" : "opacity-30"} ${busyDevice === fanId("drawing", 0) ? "opacity-50" : ""}`}>
+                  <span className={`material-symbols-outlined text-white text-[32px] drop-shadow-md ${deviceIsOn(fanId("drawing", 0)) ? "spin-slow opacity-80" : "opacity-30"} ${busyDevice === fanId("drawing", 0) ? "opacity-50" : ""}`}>
                     mode_fan
                   </span>
                 </button>
                 <button type="button" onClick={() => toggleFan("drawing", 1)} aria-label="Toggle Drawing Room Fan 2" className="absolute bottom-[20%] left-[50%] -translate-x-1/2 w-8 h-8 flex items-center justify-center z-20 hover:scale-110 transition-transform">
-                  <span className={`material-symbols-outlined text-white text-[32px] drop-shadow-md ${fans.drawing[1] ? "spin-slow opacity-80" : "opacity-30"} ${busyDevice === fanId("drawing", 1) ? "opacity-50" : ""}`}>
+                  <span className={`material-symbols-outlined text-white text-[32px] drop-shadow-md ${deviceIsOn(fanId("drawing", 1)) ? "spin-slow opacity-80" : "opacity-30"} ${busyDevice === fanId("drawing", 1) ? "opacity-50" : ""}`}>
                     mode_fan
                   </span>
                 </button>
                 <LightDot
-                  active={lights.drawing[2]}
+                  active={deviceIsOn(lightId("drawing", 2))}
                   onClick={() => toggleLight("drawing", 2)}
                   className={`bottom-[20%] left-[30%] ${busyDevice === lightId("drawing", 2) ? "opacity-50" : ""}`}
                 />
@@ -304,27 +278,27 @@ export function Map({ onExit }: MapProps) {
                 </div>
                 {/* Devices */}
                 <LightDot
-                  active={lights.work1[0]}
+                  active={deviceIsOn(lightId("work1", 0))}
                   onClick={() => toggleLight("work1", 0)}
                   className={`top-[10%] left-[15%] ${busyDevice === lightId("work1", 0) ? "opacity-50" : ""}`}
                 />
                 <LightDot
-                  active={lights.work1[1]}
+                  active={deviceIsOn(lightId("work1", 1))}
                   onClick={() => toggleLight("work1", 1)}
                   className={`top-[10%] right-[15%] ${busyDevice === lightId("work1", 1) ? "opacity-50" : ""}`}
                 />
                 <button type="button" onClick={() => toggleFan("work1", 0)} aria-label="Toggle Work Room 1 Fan 1" className="absolute top-[15%] left-[50%] -translate-x-1/2 w-8 h-8 flex items-center justify-center z-20 hover:scale-110 transition-transform">
-                  <span className={`material-symbols-outlined text-white text-[32px] ${fans.work1[0] ? "spin-slow opacity-80" : "opacity-30"} ${busyDevice === fanId("work1", 0) ? "opacity-50" : ""}`}>
+                  <span className={`material-symbols-outlined text-white text-[32px] ${deviceIsOn(fanId("work1", 0)) ? "spin-slow opacity-80" : "opacity-30"} ${busyDevice === fanId("work1", 0) ? "opacity-50" : ""}`}>
                     mode_fan
                   </span>
                 </button>
                 <button type="button" onClick={() => toggleFan("work1", 1)} aria-label="Toggle Work Room 1 Fan 2" className="absolute bottom-[35%] left-[50%] -translate-x-1/2 w-8 h-8 flex items-center justify-center z-20 hover:scale-110 transition-transform">
-                  <span className={`material-symbols-outlined text-white text-[32px] ${fans.work1[1] ? "spin-slow opacity-80" : "opacity-30"} ${busyDevice === fanId("work1", 1) ? "opacity-50" : ""}`}>
+                  <span className={`material-symbols-outlined text-white text-[32px] ${deviceIsOn(fanId("work1", 1)) ? "spin-slow opacity-80" : "opacity-30"} ${busyDevice === fanId("work1", 1) ? "opacity-50" : ""}`}>
                     mode_fan
                   </span>
                 </button>
                 <LightDot
-                  active={lights.work1[2]}
+                  active={deviceIsOn(lightId("work1", 2))}
                   onClick={() => toggleLight("work1", 2)}
                   className={`bottom-[15%] left-[50%] -translate-x-1/2 ${busyDevice === lightId("work1", 2) ? "opacity-50" : ""}`}
                 />
@@ -372,27 +346,27 @@ export function Map({ onExit }: MapProps) {
                 </div>
                 {/* Devices */}
                 <LightDot
-                  active={lights.work2[0]}
+                  active={deviceIsOn(lightId("work2", 0))}
                   onClick={() => toggleLight("work2", 0)}
                   className={`top-[10%] left-[15%] ${busyDevice === lightId("work2", 0) ? "opacity-50" : ""}`}
                 />
                 <LightDot
-                  active={lights.work2[1]}
+                  active={deviceIsOn(lightId("work2", 1))}
                   onClick={() => toggleLight("work2", 1)}
                   className={`top-[10%] right-[15%] ${busyDevice === lightId("work2", 1) ? "opacity-50" : ""}`}
                 />
                 <button type="button" onClick={() => toggleFan("work2", 0)} aria-label="Toggle Work Room 2 Fan 1" className="absolute top-[15%] left-[50%] -translate-x-1/2 w-8 h-8 flex items-center justify-center z-20 hover:scale-110 transition-transform">
-                  <span className={`material-symbols-outlined text-white text-[32px] ${fans.work2[0] ? "spin-slow opacity-80" : "opacity-30"} ${busyDevice === fanId("work2", 0) ? "opacity-50" : ""}`}>
+                  <span className={`material-symbols-outlined text-white text-[32px] ${deviceIsOn(fanId("work2", 0)) ? "spin-slow opacity-80" : "opacity-30"} ${busyDevice === fanId("work2", 0) ? "opacity-50" : ""}`}>
                     mode_fan
                   </span>
                 </button>
                 <button type="button" onClick={() => toggleFan("work2", 1)} aria-label="Toggle Work Room 2 Fan 2" className="absolute bottom-[35%] left-[50%] -translate-x-1/2 w-8 h-8 flex items-center justify-center z-20 hover:scale-110 transition-transform">
-                  <span className={`material-symbols-outlined text-white text-[32px] ${fans.work2[1] ? "spin-slow opacity-80" : "opacity-30"} ${busyDevice === fanId("work2", 1) ? "opacity-50" : ""}`}>
+                  <span className={`material-symbols-outlined text-white text-[32px] ${deviceIsOn(fanId("work2", 1)) ? "spin-slow opacity-80" : "opacity-30"} ${busyDevice === fanId("work2", 1) ? "opacity-50" : ""}`}>
                     mode_fan
                   </span>
                 </button>
                 <LightDot
-                  active={lights.work2[2]}
+                  active={deviceIsOn(lightId("work2", 2))}
                   onClick={() => toggleLight("work2", 2)}
                   className={`bottom-[15%] left-[50%] -translate-x-1/2 ${busyDevice === lightId("work2", 2) ? "opacity-50" : ""}`}
                 />
@@ -496,7 +470,7 @@ export function Map({ onExit }: MapProps) {
                 </li>
                 <li className="flex justify-between font-bold mt-2 pt-2 border-t border-border-subtle">
                   <span>Total Devices:</span>
-                  <span className="font-metric-lg text-[16px]">18</span>
+                  <span className="font-metric-lg text-[16px]">15</span>
                 </li>
               </ul>
             </div>

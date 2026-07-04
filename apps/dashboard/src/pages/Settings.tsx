@@ -83,11 +83,12 @@ export function Settings({ onExit }: SettingsProps) {
     }
   };
 
-  const handleDownloadReport = async (format: "csv" | "pdf") => {
+  const handleDownloadReport = async (report: ReportRequest) => {
+    const format = report.format;
     setBusyDownload(format);
     setReportError(null);
     try {
-      await downloadReport(format);
+      await downloadReport(format, report.id);
     } catch (cause) {
       setReportError(cause instanceof Error ? cause.message : "Unable to download report.");
     } finally {
@@ -400,7 +401,7 @@ export function Settings({ onExit }: SettingsProps) {
                           <button
                             type="button"
                             disabled={busyDownload === report.format}
-                            onClick={() => handleDownloadReport(report.format)}
+                            onClick={() => handleDownloadReport(report)}
                             aria-label={`Download ${report.format.toUpperCase()} report`}
                             className="h-8 w-8 rounded-full border border-border-subtle text-text-secondary hover:text-[#FF9D63] hover:border-[#FF9D63]/50 flex items-center justify-center transition-colors disabled:opacity-50"
                           >

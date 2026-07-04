@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { ActivityItem } from "../../../../packages/contracts/src";
 import { DashboardChrome } from "../components/DashboardChrome";
 import { getActivity } from "../lib/api";
@@ -22,105 +22,16 @@ const FILTERS: { id: "ALL" | LogCategory; label: string }[] = [
   { id: "ALL", label: "All" },
   { id: "SYSTEM", label: "System" },
   { id: "USER", label: "User" },
-  { id: "SCHEDULE", label: "Schedule" },
+  { id: "SENSOR", label: "Sensors" },
   { id: "ALERT", label: "Alerts" },
-];
-
-const ENTRIES: LogEntry[] = [
-  {
-    id: "1",
-    time: "10:42 AM",
-    message: (
-      <>
-        Work Room 1: Light 1 turned{" "}
-        <span className="text-text-secondary font-medium">ON</span>
-      </>
-    ),
-    category: "USER",
-  },
-  {
-    id: "2",
-    time: "10:18 AM",
-    message: (
-      <>
-        Work Room 1: Fan 1 turned{" "}
-        <span className="text-text-secondary font-medium">OFF</span>
-      </>
-    ),
-    category: "USER",
-  },
-  {
-    id: "3",
-    time: "09:47 AM",
-    message: (
-      <>
-        Work Room 2: Light 3 turned{" "}
-        <span className="text-text-secondary font-medium">ON</span>
-      </>
-    ),
-    category: "USER",
-  },
-  {
-    id: "4",
-    time: "09:15 AM",
-    message: (
-      <>
-        Drawing Room: Fan 2 turned{" "}
-        <span className="text-text-secondary font-medium">OFF</span>
-      </>
-    ),
-    category: "SYSTEM",
-  },
-  {
-    id: "5",
-    time: "08:52 AM",
-    message: (
-      <>
-        Work Room 2: Fan 2 turned{" "}
-        <span className="text-text-secondary font-medium">ON</span>
-      </>
-    ),
-    category: "SCHEDULE",
-  },
-  {
-    id: "6",
-    time: "08:30 AM",
-    message: (
-      <>
-        Drawing Room: Light 2 turned{" "}
-        <span className="text-text-secondary font-medium">OFF</span>
-      </>
-    ),
-    category: "SCHEDULE",
-  },
-  {
-    id: "7",
-    time: "08:05 AM",
-    message: (
-      <>
-        Work Room 1: Light 1 turned{" "}
-        <span className="text-text-secondary font-medium">ON</span>
-      </>
-    ),
-    category: "SYSTEM",
-  },
-  {
-    id: "8",
-    time: "07:42 AM",
-    message: (
-      <>
-        Drawing Room: Fan 1 turned{" "}
-        <span className="text-text-secondary font-medium">ON</span>
-      </>
-    ),
-    category: "SYSTEM",
-  },
+  { id: "MAINTENANCE", label: "Health" },
 ];
 
 function categoryFromActivity(item: ActivityItem): LogCategory {
   if (item.type.includes("alert")) return "ALERT";
   if (item.type.includes("telemetry") || item.type.includes("occupancy")) return "SENSOR";
-  if (item.type.includes("device")) return item.type.includes("api") ? "USER" : "SYSTEM";
+  if (item.type.includes("report") || item.type.includes("system")) return "MAINTENANCE";
+  if (item.type.includes("device") || item.type.includes("command")) return "USER";
   return "SYSTEM";
 }
 
@@ -130,12 +41,15 @@ function formatActivityTime(value: string): string {
 
 export function Logs({ onExit }: LogsProps) {
   const [filter, setFilter] = useState<(typeof FILTERS)[number]["id"]>("ALL");
-  const [entries, setEntries] = useState<LogEntry[]>(ENTRIES);
+  const [entries, setEntries] = useState<LogEntry[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    getActivity()
+  const refresh = useCallback(() => {
+    setLoading(true);
+    return getActivity()
       .then((result) => {
-        if (result.items.length === 0) return;
+        setLoadError(null);
         setEntries(
           result.items
             .slice()
@@ -149,8 +63,22 @@ export function Logs({ onExit }: LogsProps) {
             })),
         );
       })
-      .catch(() => setEntries(ENTRIES));
+      .catch((cause) => {
+        setLoadError(cause instanceof Error ? cause.message : "Unable to load system activity.");
+        setEntries([]);
+      })
+      .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    refresh();
+    const timer = window.setInterval(refresh, 5000);
+    window.addEventListener("focus", refresh);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [refresh]);
 
   const visible = useMemo(() => {
     if (filter === "ALL") return entries;
@@ -171,6 +99,17 @@ export function Logs({ onExit }: LogsProps) {
                 Real-time telemetry and event stream
               </p>
             </div>
+            <button
+              type="button"
+              onClick={() => refresh()}
+              disabled={loading}
+              className="inline-flex items-center gap-2 rounded-full border border-border-subtle px-3 py-1.5 font-label-caps text-label-caps uppercase text-text-secondary hover:text-[#FF9D63] hover:border-[#FF9D63]/50 disabled:opacity-50"
+            >
+              <span className={`material-symbols-outlined text-[16px] ${loading ? "spin-slow" : ""}`}>
+                refresh
+              </span>
+              Retry
+            </button>
             {/* Filter chips */}
             <div className="flex flex-wrap gap-2">
               {FILTERS.map((f) => {
@@ -217,6 +156,11 @@ export function Logs({ onExit }: LogsProps) {
 
               {/* Log entries */}
               <div className="flex-1 md:min-h-0 md:overflow-y-auto custom-scrollbar px-4 py-2 space-y-1">
+                {loadError && (
+                  <div className="my-3 rounded-lg border border-[#FF9D63]/40 bg-[#FF9D63]/10 px-3 py-3 font-body-sm text-body-sm text-[#FF9D63]">
+                    {loadError}
+                  </div>
+                )}
                 {visible.map((entry) => (
                   <div
                     key={entry.id}

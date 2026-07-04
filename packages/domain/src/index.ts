@@ -150,16 +150,16 @@ export const seedRooms = (): Room[] => ROOM_DEFINITIONS.map((room) => ({ ...room
 export const seedDevices = (): Device[] => ROOM_DEFINITIONS.flatMap((room) => createRoomDevices(room.slug));
 
 export class InMemoryOfficeRepository implements OfficeRepository {
-  private readonly rooms = seedRooms();
-  private readonly devices = seedDevices();
-  private readonly deviceStates = new Map<string, DeviceState>();
-  private readonly occupancy = new Map<RoomSlug, OccupancySnapshot>();
-  private readonly alerts = new Map<string, Alert>();
-  private readonly activity: ActivityItem[] = [];
-  private readonly commands = new Map<string, DeviceCommand>();
-  private readonly reports = new Map<string, ReportRequest>();
-  private readonly aiActions = new Map<string, AiAction>();
-  private stateVersion = 1;
+  protected readonly rooms = seedRooms();
+  protected readonly devices = seedDevices();
+  protected readonly deviceStates = new Map<string, DeviceState>();
+  protected readonly occupancy = new Map<RoomSlug, OccupancySnapshot>();
+  protected readonly alerts = new Map<string, Alert>();
+  protected readonly activity: ActivityItem[] = [];
+  protected readonly commands = new Map<string, DeviceCommand>();
+  protected readonly reports = new Map<string, ReportRequest>();
+  protected readonly aiActions = new Map<string, AiAction>();
+  protected stateVersion = 1;
 
   constructor(now = new Date()) {
     const timestamp = now.toISOString();
@@ -229,6 +229,27 @@ export class InMemoryOfficeRepository implements OfficeRepository {
 
   getStateVersion(): number {
     return this.stateVersion;
+  }
+
+  hydrateCurrentState(options: {
+    deviceStates?: DeviceState[];
+    occupancy?: OccupancySnapshot[];
+    stateVersion?: number;
+  }) {
+    for (const state of options.deviceStates ?? []) {
+      if (!this.devices.some((device) => device.id === state.deviceId)) continue;
+      this.deviceStates.set(state.deviceId, { ...state });
+    }
+    for (const state of options.occupancy ?? []) {
+      if (!this.rooms.some((room) => room.slug === state.roomId)) continue;
+      this.occupancy.set(state.roomId, { ...state });
+    }
+    this.stateVersion = Math.max(
+      this.stateVersion,
+      options.stateVersion ?? 1,
+      ...[...this.deviceStates.values()].map((state) => state.stateVersion)
+    );
+    this.refreshAlerts(new Date().toISOString());
   }
 
   updateDeviceState(deviceId: string, status: "on" | "off", source: DeviceState["source"]): DeviceState | null {
@@ -572,5 +593,5 @@ export function buildOfficeSnapshot(repository: OfficeRepository, options: Snaps
 }
 
 function sumPower(devices: Array<{ state: DeviceState }>): number {
-  return devices.reduce((total, device) => total + device.state.powerWatts, 0);
+  return Number(devices.reduce((total, device) => total + device.state.powerWatts, 0).toFixed(2));
 }

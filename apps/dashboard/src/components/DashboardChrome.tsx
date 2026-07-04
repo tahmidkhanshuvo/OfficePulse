@@ -1,6 +1,9 @@
-import { type ReactNode, type CSSProperties } from "react";
+import { useEffect, useState, type ReactNode, type CSSProperties } from "react";
+import type { Alert } from "../../../../packages/contracts/src";
 import { BrandMark } from "./BrandMark";
 import { useOfficeSnapshot } from "../hooks/useOfficeSnapshot";
+import { getAlerts, updateAlert, withControlRetry } from "../lib/api";
+import { formatKwh, formatWatts } from "../lib/format";
 
 type Section = "overview" | "map" | "analytics" | "logs" | "settings";
 
@@ -59,12 +62,41 @@ export function DashboardChrome({
   children,
 }: DashboardChromeProps) {
   const { snapshot } = useOfficeSnapshot();
+  const [alertsOpen, setAlertsOpen] = useState(false);
+  const [alerts, setAlerts] = useState<Alert[]>([]);
+  const activeAlerts = alerts.filter((alert) => alert.status === "active");
+
+  useEffect(() => {
+    const refreshAlerts = () => {
+      getAlerts()
+        .then((next) => setAlerts(next.alerts))
+        .catch(() => setAlerts(snapshot?.alerts ?? []));
+    };
+    refreshAlerts();
+    const timer = window.setInterval(refreshAlerts, 5000);
+    window.addEventListener("focus", refreshAlerts);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refreshAlerts);
+    };
+  }, [snapshot?.realtime.stateVersion]);
+
+  const handleAlertAction = async (alertId: string, action: "acknowledge" | "resolve" | "snooze") => {
+    await withControlRetry(() => updateAlert(alertId, action));
+    setAlerts((current) =>
+      current.map((alert) =>
+        alert.id === alertId
+          ? { ...alert, status: action === "resolve" ? "resolved" : action === "snooze" ? "snoozed" : "acknowledged" }
+          : alert,
+      ),
+    );
+  };
   const center =
     topNavCenter ?? (
       <>
-        <MetricChip label="Total Office Power" value={snapshot ? `${snapshot.energy.totalPowerWatts}W` : "450W"} />
+        <MetricChip label="Total Office Power" value={snapshot ? formatWatts(snapshot.energy.totalPowerWatts) : "450W"} />
         <div className="h-8 w-px bg-border-subtle" />
-        <MetricChip label="Today" value={snapshot ? `${snapshot.energy.todayKwh} kWh` : "12.4 kWh"} />
+        <MetricChip label="Today" value={snapshot ? formatKwh(snapshot.energy.todayKwh) : "12.4 kWh"} />
       </>
     );
 
@@ -93,7 +125,21 @@ export function DashboardChrome({
               ONLINE
             </span>
           </div>
-          <div className="flex gap-3">
+          <div className="relative flex gap-3">
+            <button
+              type="button"
+              aria-label="Alerts"
+              title="Alerts"
+              onClick={() => setAlertsOpen((open) => !open)}
+              className="relative p-1 text-text-secondary hover:text-text-primary transition-colors duration-200 active:scale-95"
+            >
+              <Icon name="notifications" />
+              {activeAlerts.length > 0 && (
+                <span className="absolute -right-1 -top-1 min-w-4 h-4 rounded-full bg-[#FF9D63] text-black text-[10px] leading-4 text-center font-label-caps">
+                  {activeAlerts.length}
+                </span>
+              )}
+            </button>
             <a
               href="#/overview"
               aria-label="Overview"
@@ -127,6 +173,73 @@ export function DashboardChrome({
               >
                 <Icon name="logout" />
               </button>
+            )}
+            {alertsOpen && (
+              <div className="absolute right-0 top-10 z-50 w-[min(360px,calc(100vw-32px))] rounded-xl border border-white/10 bg-black/75 backdrop-blur-2xl shadow-[0_24px_80px_rgba(0,0,0,0.65)]">
+                <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
+                  <div>
+                    <h3 className="font-headline-md text-[18px] leading-6 text-text-primary">Alerts</h3>
+                    <p className="font-label-caps text-label-caps text-text-secondary uppercase">
+                      {activeAlerts.length} active
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setAlertsOpen(false)}
+                    className="h-8 w-8 rounded-full border border-border-subtle text-text-secondary hover:text-text-primary"
+                    aria-label="Close alerts"
+                  >
+                    <span className="material-symbols-outlined text-[18px]">close</span>
+                  </button>
+                </div>
+                <div className="max-h-96 overflow-y-auto custom-scrollbar p-3 space-y-3">
+                  {activeAlerts.length === 0 && (
+                    <div className="rounded-lg border border-border-subtle bg-white/[0.03] px-3 py-4 font-body-sm text-body-sm text-text-secondary">
+                      No active alerts.
+                    </div>
+                  )}
+                  {activeAlerts.map((alert) => (
+                    <div key={alert.id} className="rounded-lg border border-[#FF9D63]/25 bg-[#FF9D63]/10 p-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="font-label-caps text-label-caps text-text-primary uppercase break-words">
+                            {alert.title}
+                          </div>
+                          <p className="mt-1 font-body-sm text-body-sm text-text-secondary">
+                            {alert.message}
+                          </p>
+                        </div>
+                        <span className="rounded-full border border-[#FF9D63]/50 px-2 py-0.5 font-label-caps text-[9px] uppercase text-[#FF9D63]">
+                          {alert.severity}
+                        </span>
+                      </div>
+                      <div className="mt-3 grid grid-cols-3 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleAlertAction(alert.id, "acknowledge")}
+                          className="rounded border border-[#FF9D63]/60 px-2 py-1.5 font-label-caps text-[10px] uppercase text-[#FF9D63] hover:bg-[#FF9D63]/10"
+                        >
+                          Ack
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleAlertAction(alert.id, "snooze")}
+                          className="rounded border border-border-subtle px-2 py-1.5 font-label-caps text-[10px] uppercase text-text-secondary hover:text-[#FF9D63]"
+                        >
+                          Snooze
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleAlertAction(alert.id, "resolve")}
+                          className="rounded bg-[#FF9D63] px-2 py-1.5 font-label-caps text-[10px] uppercase text-black hover:opacity-90"
+                        >
+                          Resolve
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
             )}
           </div>
         </div>

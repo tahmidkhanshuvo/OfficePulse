@@ -26,7 +26,10 @@ export class ApiError extends Error {
 function defaultBaseUrl(): string {
   const viteUrl = import.meta.env.VITE_API_URL || import.meta.env.VITE_PUBLIC_API_URL;
   if (viteUrl) return String(viteUrl).replace(/\/$/, "");
-  if (typeof window !== "undefined" && window.location.port === "5173") {
+  if (
+    typeof window !== "undefined" &&
+    (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
+  ) {
     return "http://localhost:3000";
   }
   return "";
@@ -136,7 +139,23 @@ export function getDeviceUsage(deviceId: string) {
     powerWatts: number;
     todayKwh: number;
     estimatedCostToday: number;
+    runtimeHours: number;
+    averagePowerWatts: number;
+    sampleCount: number;
   }>(`/api/v1/devices/${deviceId}/usage`);
+}
+
+export function getDeviceTelemetry(deviceId: string, limit = 48) {
+  return api<{
+    deviceId: string;
+    points: Array<{
+      deviceId: string;
+      status: "on" | "off" | "unknown";
+      powerWatts: number;
+      source: string;
+      observedAt: string;
+    }>;
+  }>(`/api/v1/devices/${deviceId}/telemetry?limit=${limit}`);
 }
 
 export function getEnergyHistory() {
@@ -199,8 +218,12 @@ export function reportDownloadUrl(format: "csv" | "pdf") {
   return `${API_BASE_URL}/api/v1/reports/downloads/${format}/latest`;
 }
 
-export async function downloadReport(format: "csv" | "pdf") {
-  const response = await fetch(reportDownloadUrl(format), { credentials: "include" });
+export function reportDownloadByIdUrl(reportId: string) {
+  return `${API_BASE_URL}/api/v1/reports/${encodeURIComponent(reportId)}/download`;
+}
+
+export async function downloadReport(format: "csv" | "pdf", reportId?: string) {
+  const response = await fetch(reportId ? reportDownloadByIdUrl(reportId) : reportDownloadUrl(format), { credentials: "include" });
   if (!response.ok) {
     const text = await response.text();
     let message = response.statusText;
@@ -215,7 +238,7 @@ export async function downloadReport(format: "csv" | "pdf") {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = `officepulse-report.${format}`;
+  anchor.download = reportId ? `${reportId}.${format}` : `officepulse-report.${format}`;
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
