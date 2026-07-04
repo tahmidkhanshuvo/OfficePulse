@@ -1,3 +1,261 @@
-<div id="root"></div>
-<script type="module" src="/src/main.tsx"></script>
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Admin Login - OfficePulse</title>
+
+    <link
+      rel="icon"
+      type="image/png"
+      href="https://i.imgur.com/13VMp4Q.png"
+    />
+    <link
+      rel="apple-touch-icon"
+      href="https://i.imgur.com/13VMp4Q.png"
+    />
+    <meta property="og:image" content="https://i.imgur.com/13VMp4Q.png" />
+    <meta name="twitter:image" content="https://i.imgur.com/13VMp4Q.png" />
+
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <script>
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "on-primary": "#2f3131",
+              "background": "#131313",
+              "on-secondary-fixed-variant": "#920021",
+              "surface-container-highest": "#353534",
+              "tertiary": "#ffffff",
+              "secondary-fixed-dim": "#ffb3b3",
+              "secondary-container": "#a80228",
+              "surface-container-high": "#2a2a2a",
+              "surface-container-low": "#1c1b1b",
+              "secondary": "#ffb3b3",
+              "inverse-surface": "#e5e2e1",
+              "outline": "#8e9192",
+              "tertiary-fixed-dim": "#ffb77f",
+              "accent-purple": "#A855F7",
+              "surface-bright": "#3a3939",
+              "on-tertiary-container": "#9a5100",
+              "text-secondary": "#888888",
+              "tertiary-fixed": "#ffdcc4",
+              "primary-fixed-dim": "#c6c6c7",
+              "surface-tint": "#c6c6c7",
+              "on-secondary-container": "#ffb2b2",
+              "primary-fixed": "#e2e2e2",
+              "outline-variant": "#444748",
+              "error-container": "#93000a",
+              "on-secondary-fixed": "#400009",
+              "on-tertiary-fixed": "#2f1500",
+              "surface": "#131313",
+              "primary": "#ffffff",
+              "surface-container": "#201f1f",
+              "inverse-primary": "#5d5f5f",
+              "primary-container": "#e2e2e2",
+              "bg-deep": "#0A0A0A",
+              "border-subtle": "rgba(255, 255, 255, 0.1)",
+              "surface-container-lowest": "#0e0e0e",
+              "on-error-container": "#ffdad6",
+              "on-primary-fixed-variant": "#454747",
+              "surface-panel": "rgba(255, 255, 255, 0.03)",
+              "on-primary-fixed": "#1a1c1c",
+              "surface-dim": "#131313",
+              "tertiary-container": "#ffdcc4",
+              "on-error": "#690005",
+              "on-tertiary-fixed-variant": "#6f3900",
+              "on-background": "#e5e2e1",
+              "secondary-fixed": "#ffdad9",
+              "on-surface-variant": "#c4c7c8",
+              "on-secondary": "#680015",
+              "inverse-on-surface": "#313030",
+              "text-primary": "#FFFFFF",
+              "surface-variant": "#353534",
+              "on-surface": "#e5e2e1",
+              "error": "#ffb4ab",
+              "on-tertiary": "#4e2600",
+              "on-primary-container": "#636565",
+              "panel-bg": "rgba(255, 255, 255, 0.03)",
+              "accent-orange": "#FF9D63"
+            },
+            borderRadius: {
+              DEFAULT: "0.25rem",
+              lg: "0.5rem",
+              xl: "0.75rem",
+              full: "9999px"
+            },
+            spacing: {
+              unit: "4px",
+              "container-max": "1200px",
+              gutter: "16px",
+              "margin-desktop": "32px",
+              "margin-mobile": "16px"
+            },
+            fontFamily: {
+              "headline-md": ["Inter"],
+              "metric-lg": ["Geist Mono"],
+              "display-lg": ["Inter"],
+              "body-base": ["Inter"],
+              "body-sm": ["Inter"],
+              "label-caps": ["Geist Mono"]
+            },
+            fontSize: {
+              "headline-md": ["24px", { lineHeight: "32px", letterSpacing: "-0.01em", fontWeight: "600" }],
+              "metric-lg": ["18px", { lineHeight: "24px", letterSpacing: "0.02em", fontWeight: "500" }],
+              "display-lg": ["48px", { lineHeight: "56px", letterSpacing: "-0.02em", fontWeight: "700" }],
+              "body-base": ["14px", { lineHeight: "20px", fontWeight: "400" }],
+              "body-sm": ["12px", { lineHeight: "16px", fontWeight: "400" }],
+              "label-caps": ["10px", { lineHeight: "12px", letterSpacing: "0.05em", fontWeight: "600" }]
+            }
+          }
+        }
+      };
+    </script>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap"
+    />
+
+    <style>
+      body { background-color: #0A0A0A; margin: 0; }
+      .material-symbols-outlined {
+        font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        user-select: none;
+        color: #FF9D63;
+      }
+      .login-icon {
+        font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        user-select: none;
+        color: #FFFFFF;
+      }
+      .gradient-border-glow:focus-within {
+        box-shadow: 0 0 0 1px rgba(255, 179, 179, 0.5), 0 0 8px rgba(168, 2, 40, 0.3);
+        border-color: #ffb3b3;
+      }
+      .btn-gradient {
+        background-color: rgba(255, 255, 255, 0.9);
+        color: #000;
+      }
+      .btn-gradient:hover { background-color: #ffffff; }
+
+      :root {
+        --text-secondary: #888888;
+        --accent-orange: #FF9D63;
+      }
+      .accent-orange {
+        color: var(--accent-orange);
+      }
+      .bg-accent-orange {
+        background-color: var(--accent-orange);
+      }
+      .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+      .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+      .custom-scrollbar::-webkit-scrollbar-thumb {
+        background-color: rgba(255, 255, 255, 0.1);
+        border-radius: 10px;
+      }
+
+      /* Floorplan styles */
+      @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+      .spin-slow { animation: spin 4s linear infinite; }
+      .glow-active { box-shadow: 0 0 20px 8px rgba(255, 204, 0, 0.6); background-color: rgba(255,204,0,0.8); }
+      .glow-inactive { box-shadow: inset 0 0 5px rgba(255,255,255,0.2); background-color: rgba(255,255,255,0.1); }
+      .room-panel {
+        background-color: rgba(255, 255, 255, 0.02);
+        backdrop-filter: blur(20px);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        position: relative;
+      }
+      .floor-grid {
+        background-image:
+          linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+        background-size: 20px 20px;
+      }
+      .floor-grid-wood {
+        background-image: linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
+        background-size: 40px 100%;
+      }
+      .door-arc {
+        width: 40px;
+        height: 40px;
+        border-top: 1px solid rgba(255,255,255,0.3);
+        border-right: 1px solid rgba(255,255,255,0.3);
+        border-radius: 0 40px 0 0;
+        position: absolute;
+      }
+      .door-line {
+        width: 40px;
+        height: 1px;
+        background-color: rgba(255,255,255,0.5);
+        position: absolute;
+      }
+      .window-line {
+        height: 4px;
+        background-color: rgba(100, 200, 255, 0.3);
+        border: 1px solid rgba(100, 200, 255, 0.5);
+        position: absolute;
+      }
+      .desk {
+        width: 80px;
+        height: 50px;
+        background-color: rgba(255,255,255,0.05);
+        border: 1px solid rgba(255,255,255,0.1);
+        border-radius: 4px;
+        position: absolute;
+      }
+      .monitor {
+        width: 30px;
+        height: 8px;
+        background-color: rgba(0,0,0,0.5);
+        border: 1px solid rgba(255,255,255,0.2);
+        border-radius: 2px;
+        position: absolute;
+      }
+      .keyboard {
+        width: 20px;
+        height: 6px;
+        background-color: rgba(255,255,255,0.1);
+        position: absolute;
+      }
+      .chair {
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        background-color: rgba(255,255,255,0.08);
+        border: 1px solid rgba(255,255,255,0.2);
+        position: absolute;
+      }
+      .sofa {
+        width: 30px;
+        background-color: rgba(255,255,255,0.05);
+        border: 1px solid rgba(255,255,255,0.15);
+        border-radius: 4px;
+        position: absolute;
+      }
+      .table-fp {
+        background-color: rgba(255,255,255,0.03);
+        border: 1px solid rgba(255,255,255,0.1);
+        position: absolute;
+      }
+      .plant {
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        background-color: rgba(50, 150, 50, 0.2);
+        border: 1px dashed rgba(50, 200, 50, 0.4);
+        position: absolute;
+      }
+    </style>
+  </head>
+  <body class="bg-bg-deep">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
 

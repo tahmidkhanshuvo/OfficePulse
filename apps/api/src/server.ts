@@ -9,13 +9,30 @@ import {
 } from "../../../packages/auth/src";
 import { loadConfig } from "../../../packages/config/src";
 import type { ApiEnvelope, ApiErrorEnvelope } from "../../../packages/contracts/src";
-import { buildOfficeSnapshot, buildUsageRankings, InMemoryOfficeRepository } from "../../../packages/domain/src";
+import { createPersistentOfficeRepository } from "../../../packages/db/src";
+import { buildOfficeSnapshot, buildUsageRankings } from "../../../packages/domain/src";
 import { createLogger } from "../../../packages/logger/src";
 import { checkRedisHealth } from "../../../packages/redis/src";
+import { DeviceTelemetryGenerator } from "./device-telemetry-generator";
 
 const config = loadConfig();
 const logger = createLogger("api");
-const office = new InMemoryOfficeRepository();
+const snapshotOptions = {
+  currency: config.currency,
+  tariffPerKwh: config.defaultTariffPerKwh,
+  timezone: config.timezone,
+  publicWsUrl: config.publicWsUrl,
+  platformAuthenticated: false,
+  controlAuthorized: false
+};
+const office = await createPersistentOfficeRepository({
+  databaseUrl: config.databaseDirectUrl || config.databaseUrl,
+  redisUrl: config.redisUrl,
+  snapshotOptions,
+  logger
+});
+const telemetryGenerator = new DeviceTelemetryGenerator(office);
+telemetryGenerator.warmStartFromCurrentState();
 const sessions = new InMemorySessionStore({
   ttlSeconds: config.platformSessionTtlSeconds,
   idleTimeoutSeconds: config.platformIdleTimeoutSeconds,
@@ -108,10 +125,7 @@ function fileResponse(context: RequestContext, body: string, contentType: string
 
 function snapshot(context: RequestContext) {
   return buildOfficeSnapshot(office, {
-    currency: config.currency,
-    tariffPerKwh: config.defaultTariffPerKwh,
-    timezone: config.timezone,
-    publicWsUrl: config.publicWsUrl,
+    ...snapshotOptions,
     platformAuthenticated: Boolean(context.session),
     controlAuthorized: context.controlAuthorized
   });
@@ -122,6 +136,189 @@ async function readJson(request: Request): Promise<Record<string, unknown>> {
   const value = await request.json();
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   return value as Record<string, unknown>;
+}
+
+function roomFromText(text: string) {
+  if (/(drawing|living)/.test(text)) return "drawing" as const;
+  if (/(work\s*room\s*1|work1|room\s*1)/.test(text)) return "work1" as const;
+  if (/(work\s*room\s*2|work2|room\s*2)/.test(text)) return "work2" as const;
+  return null;
+}
+
+function deviceTypeFromText(text: string): "fan" | "light" | null {
+  if (/\bfans?\b/.test(text)) return "fan";
+  if (/\blights?\b|lighting/.test(text)) return "light";
+  return null;
+}
+
+function deviceNumberFromText(text: string): number | null {
+  const match = text.match(/\b(?:fan|light)\s*(\d+)\b/);
+  if (!match) return null;
+  const value = Number(match[1]);
+  return Number.isFinite(value) ? value : null;
+}
+
+function formatRoomName(roomId: string) {
+  if (roomId === "drawing") return "Drawing Room";
+  if (roomId === "work1") return "Work Room 1";
+  if (roomId === "work2") return "Work Room 2";
+  return roomId;
+}
+
+async function getCurrentMonthBilling() {
+  const persisted = await office.getCurrentMonthRoomEnergy(config.defaultTariffPerKwh);
+  if (persisted.length > 0 && persisted.some((room) => room.energyKwh > 0)) {
+    return persisted;
+  }
+  const current = buildOfficeSnapshot(office, snapshotOptions);
+  const elapsedMonthHours = Math.max(
+    1,
+    (Date.now() - new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime()) / 3_600_000
+  );
+  return current.rooms.map((room) => {
+    const energyKwh = Number(((room.powerWatts / 1000) * elapsedMonthHours).toFixed(4));
+    return {
+      roomId: room.room.slug,
+      roomName: room.room.name,
+      energyKwh,
+      cost: Number((energyKwh * config.defaultTariffPerKwh).toFixed(2)),
+      currencyTariff: config.defaultTariffPerKwh
+    };
+  });
+}
+
+async function buildAgentReply(context: RequestContext, message: string) {
+  const lower = message.toLowerCase();
+  const current = snapshot(context);
+  const roomId = roomFromText(lower);
+  const deviceType = deviceTypeFromText(lower);
+  const deviceNumber = deviceNumberFromText(lower);
+  const wantsOff = /(turn|switch|power|shut)\s*(all\s*)?off|shutdown|shut down/.test(lower);
+  const wantsOn = /(turn|switch|power)\s*(all\s*)?on/.test(lower);
+  const toolTrace: Array<{ tool: string; success: boolean; details?: string }> = [];
+
+  if (wantsOff || wantsOn) {
+    const action = wantsOff ? "off" : "on";
+    const controlError = requireControl(context);
+    if (controlError) return controlError;
+
+    if (wantsOff && /(office|everything|all rooms|all devices)/.test(lower)) {
+      office.shutdownOffice("Pulse assistant requested office shutdown", "pulse");
+      telemetryGenerator.syncOffice("off");
+      toolTrace.push({ tool: "propose_office_shutdown", success: true });
+      return json(context, {
+        conversationId: context.url.pathname.split("/")[5] ?? "pulse",
+        answer: "Done. I turned off all office devices.",
+        toolTrace,
+        message
+      });
+    }
+
+    if (roomId && wantsOff && !deviceType) {
+      office.shutdownRoom(roomId, "Pulse assistant requested room shutdown", "pulse");
+      telemetryGenerator.syncRoom(roomId, "off");
+      toolTrace.push({ tool: "propose_room_shutdown", success: true, details: roomId });
+      return json(context, {
+        conversationId: context.url.pathname.split("/")[5] ?? "pulse",
+        answer: `Done. I turned off ${formatRoomName(roomId)}.`,
+        toolTrace,
+        message
+      });
+    }
+
+    let targets = current.devices;
+    if (roomId) targets = targets.filter((device) => device.roomId === roomId);
+    if (deviceType) targets = targets.filter((device) => device.type === deviceType);
+    if (deviceType && deviceNumber) targets = targets.filter((device) => device.label.toLowerCase() === `${deviceType} ${deviceNumber}`);
+    if (targets.length === 0) {
+      return json(context, {
+        conversationId: context.url.pathname.split("/")[5] ?? "pulse",
+        answer: "I could not find a matching device. Try saying the room and device, like 'turn off Work Room 1 fan 1'.",
+        toolTrace: [{ tool: "propose_device_command", success: false, details: "no_target" }],
+        message
+      });
+    }
+    for (const device of targets) {
+      office.updateDeviceState(device.id, action, "api");
+      telemetryGenerator.syncDevice(device.id, action);
+    }
+    toolTrace.push({ tool: "propose_device_command", success: true, details: `${targets.length} devices ${action}` });
+    const scope = roomId ? ` in ${formatRoomName(roomId)}` : "";
+    const label = deviceType ? `${deviceType}${targets.length > 1 ? "s" : ""}` : `${targets.length} device${targets.length === 1 ? "" : "s"}`;
+    return json(context, {
+      conversationId: context.url.pathname.split("/")[5] ?? "pulse",
+      answer: `Done. I turned ${action} ${label}${scope}.`,
+      toolTrace,
+      message
+    });
+  }
+
+  if (/alert|issue|warning/.test(lower)) {
+    const active = current.alerts.filter((alert) => alert.status === "active");
+    toolTrace.push({ tool: "list_active_alerts", success: true });
+    return json(context, {
+      conversationId: context.url.pathname.split("/")[5] ?? "pulse",
+      answer: active.length === 0
+        ? "There are no active alerts right now."
+        : `Active alerts: ${active.map((alert) => `${alert.title} (${alert.severity})`).join("; ")}.`,
+      toolTrace,
+      message
+    });
+  }
+
+  if (/bill|monthly|cost|forecast/.test(lower)) {
+    const billing = await getCurrentMonthBilling();
+    const lines = billing.map((room) => `${room.roomName}: ${room.energyKwh.toFixed(2)} kWh, ${room.cost.toFixed(2)} ${config.currency}`);
+    toolTrace.push({ tool: "get_usage_summary", success: true });
+    return json(context, {
+      conversationId: context.url.pathname.split("/")[5] ?? "pulse",
+      answer: `Current month bill so far: ${lines.join("; ")}.`,
+      toolTrace,
+      message
+    });
+  }
+
+  if (/advice|recommend|optimi[sz]e|save|waste/.test(lower)) {
+    const activeRooms = current.rooms.filter((room) => room.activeDeviceCount > 0);
+    const vacantWaste = activeRooms.filter((room) => room.occupancy.state === "vacant");
+    const highest = [...current.rooms].sort((a, b) => b.powerWatts - a.powerWatts)[0];
+    const advice = vacantWaste.length > 0
+      ? `Start with ${vacantWaste.map((room) => room.room.name).join(", ")} because it is vacant with devices still on.`
+      : highest
+        ? `${highest.room.name} is drawing the most power at ${highest.powerWatts.toFixed(2)}W. Check whether its fans or lights are still needed.`
+        : "Everything looks quiet right now.";
+    toolTrace.push({ tool: "get_office_snapshot", success: true });
+    return json(context, {
+      conversationId: context.url.pathname.split("/")[5] ?? "pulse",
+      answer: advice,
+      toolTrace,
+      message
+    });
+  }
+
+  if (/health|system|redis|database|api/.test(lower)) {
+    const redis = await checkRedisHealth(config.redisUrl);
+    toolTrace.push({ tool: "get_system_health", success: true });
+    return json(context, {
+      conversationId: context.url.pathname.split("/")[5] ?? "pulse",
+      answer: `System health: API healthy, database ${config.databaseUrl ? "configured" : "not configured"}, Redis ${redis.status}.`,
+      toolTrace,
+      message
+    });
+  }
+
+  const roomLines = current.rooms.map((room) => {
+    const fans = room.devices.filter((device) => device.type === "fan" && device.state.status === "on").length;
+    const lights = room.devices.filter((device) => device.type === "light" && device.state.status === "on").length;
+    return `${room.room.name}: ${room.powerWatts.toFixed(2)}W, ${fans} fans on, ${lights} lights on, occupancy ${room.occupancy.state.replace("_", " ")}`;
+  });
+  toolTrace.push({ tool: "get_office_snapshot", success: true });
+  return json(context, {
+    conversationId: context.url.pathname.split("/")[5] ?? "pulse",
+    answer: `Current office load is ${current.energy.totalPowerWatts.toFixed(2)}W. ${roomLines.join("; ")}.`,
+    toolTrace,
+    message
+  });
 }
 
 function requirePlatform(context: RequestContext): Response | null {
@@ -388,13 +585,26 @@ async function route(context: RequestContext): Promise<Response> {
   if (method === "GET" && deviceUsageMatch) {
     const device = snapshot(context).devices.find((candidate) => candidate.id === deviceUsageMatch[1]);
     if (!device) return error(context, 404, "DEVICE_NOT_FOUND", "Device not found.", { deviceId: deviceUsageMatch[1] });
-    const todayKwh = Number(((device.state.powerWatts * 8) / 1000).toFixed(3));
+    const persistedUsage = await office.getDeviceUsageToday(device.id);
+    const todayKwh = persistedUsage?.todayKwh ?? Number(((device.state.powerWatts * 8) / 1000).toFixed(3));
     return json(context, {
       deviceId: device.id,
       powerWatts: device.state.powerWatts,
       todayKwh,
-      estimatedCostToday: Number((todayKwh * config.defaultTariffPerKwh).toFixed(2))
+      estimatedCostToday: Number((todayKwh * config.defaultTariffPerKwh).toFixed(2)),
+      runtimeHours: persistedUsage?.runtimeHours ?? (device.state.status === "on" ? 8 : 0),
+      averagePowerWatts: persistedUsage?.averagePowerWatts ?? device.state.powerWatts,
+      sampleCount: persistedUsage?.sampleCount ?? 0
     });
+  }
+
+  const deviceTelemetryMatch = path.match(/^\/api\/v1\/devices\/([^/]+)\/telemetry$/);
+  if (method === "GET" && deviceTelemetryMatch) {
+    const device = snapshot(context).devices.find((candidate) => candidate.id === deviceTelemetryMatch[1]);
+    if (!device) return error(context, 404, "DEVICE_NOT_FOUND", "Device not found.", { deviceId: deviceTelemetryMatch[1] });
+    const limit = Math.min(Math.max(Number(url.searchParams.get("limit") ?? 48), 1), 200);
+    const points = await office.getDeviceTelemetry(device.id, limit);
+    return json(context, { deviceId: device.id, points });
   }
 
   const deviceHistoryMatch = path.match(/^\/api\/v1\/devices\/([^/]+)\/history$/);
@@ -428,6 +638,7 @@ async function route(context: RequestContext): Promise<Response> {
     }
     const state = office.updateDeviceState(commandMatch[1], action, "api");
     if (!state) return error(context, 404, "DEVICE_NOT_FOUND", "Device not found.", { deviceId: commandMatch[1] });
+    telemetryGenerator.syncDevice(commandMatch[1], action);
     return json(
       context,
       {
@@ -447,19 +658,24 @@ async function route(context: RequestContext): Promise<Response> {
     if (controlError) return controlError;
     const command = office.shutdownRoom(roomShutdownMatch[1] as never, "Room shutdown requested", "dashboard");
     if (!command) return error(context, 404, "ROOM_NOT_FOUND", "Room not found.", { roomId: roomShutdownMatch[1] });
+    telemetryGenerator.syncRoom(roomShutdownMatch[1], "off");
     return json(context, command, { status: 202 });
   }
 
   if (method === "POST" && path === "/api/v1/office/commands/shutdown") {
     const controlError = requireControl(context);
     if (controlError) return controlError;
-    return json(context, office.shutdownOffice("Office shutdown requested", "dashboard"), { status: 202 });
+    const command = office.shutdownOffice("Office shutdown requested", "dashboard");
+    telemetryGenerator.syncOffice("off");
+    return json(context, command, { status: 202 });
   }
 
   if (method === "POST" && path === "/api/v1/office/commands/emergency-shutdown") {
     const controlError = requireControl(context);
     if (controlError) return controlError;
-    return json(context, office.shutdownOffice("Emergency shutdown requested", "dashboard"), { status: 202 });
+    const command = office.shutdownOffice("Emergency shutdown requested", "dashboard");
+    telemetryGenerator.syncOffice("off");
+    return json(context, command, { status: 202 });
   }
 
   if (method === "GET" && path === "/api/v1/occupancy") {
@@ -489,15 +705,28 @@ async function route(context: RequestContext): Promise<Response> {
     return json(context, snapshot(context).energy);
   }
 
+  if (method === "GET" && path === "/api/v1/energy/month-to-date") {
+    const rooms = await getCurrentMonthBilling();
+    return json(context, {
+      currency: config.currency,
+      tariffPerKwh: config.defaultTariffPerKwh,
+      month: new Date().toISOString().slice(0, 7),
+      rooms,
+      totalKwh: Number(rooms.reduce((total, room) => total + room.energyKwh, 0).toFixed(4)),
+      totalCost: Number(rooms.reduce((total, room) => total + room.cost, 0).toFixed(2))
+    });
+  }
+
   if (method === "GET" && path === "/api/v1/energy/rankings") {
     return json(context, buildUsageRankings(office));
   }
 
   if (method === "GET" && path === "/api/v1/energy/history") {
     const current = snapshot(context);
+    const persistedPoints = await office.getEnergyHistoryPoints(48);
     return json(context, {
       granularity: "hour",
-      points: [
+      points: persistedPoints.length > 0 ? persistedPoints : [
         {
           recordedAt: current.generatedAt,
           powerWatts: current.energy.totalPowerWatts,
@@ -542,12 +771,34 @@ async function route(context: RequestContext): Promise<Response> {
     });
   }
 
-  const alertActionMatch = path.match(/^\/api\/v1\/alerts\/([^/]+)\/(acknowledge|resolve|snooze|mute)$/);
+  const alertActionMatch = path.match(/^\/api\/v1\/alerts\/([^/]+)\/(resolve|snooze|forget)$/);
   if (method === "POST" && alertActionMatch) {
     const controlError = requireControl(context);
     if (controlError) return controlError;
-    const status = alertActionMatch[2] === "resolve" ? "resolved" : alertActionMatch[2] === "snooze" ? "snoozed" : "acknowledged";
-    const alert = office.updateAlertStatus(alertActionMatch[1], status);
+    const alertId = alertActionMatch[1];
+    const action = alertActionMatch[2];
+    const currentAlert = office.getAlerts().find((alert) => alert.id === alertId);
+    if (!currentAlert) return error(context, 404, "ALERT_NOT_FOUND", "Alert not found.", { alertId });
+
+    if (action === "resolve") {
+      if (currentAlert.roomId) {
+        office.shutdownRoom(currentAlert.roomId, "Alert resolved from dashboard", "dashboard");
+        telemetryGenerator.syncRoom(currentAlert.roomId, "off");
+      } else if (currentAlert.deviceId) {
+        office.updateDeviceState(currentAlert.deviceId, "off", "api");
+        telemetryGenerator.syncDevice(currentAlert.deviceId, "off");
+      }
+      const alert = office.updateAlertStatus(alertId, "resolved") ?? {
+        ...currentAlert,
+        status: "resolved" as const,
+        updatedAt: new Date().toISOString()
+      };
+      return json(context, alert);
+    }
+
+    const delayMs = action === "forget" ? 60 * 60 * 1000 : 2 * 60 * 1000;
+    const suppressedUntil = new Date(Date.now() + delayMs).toISOString();
+    const alert = office.updateAlertStatus(alertId, "snoozed", { suppressedUntil });
     if (!alert) return error(context, 404, "ALERT_NOT_FOUND", "Alert not found.", { alertId: alertActionMatch[1] });
     return json(context, alert);
   }
@@ -630,14 +881,7 @@ async function route(context: RequestContext): Promise<Response> {
   if (method === "POST" && aiMessageMatch) {
     const body = await readJson(request);
     const message = typeof body.message === "string" ? body.message : "";
-    const current = snapshot(context);
-    const answer = `Current office load is ${current.energy.totalPowerWatts} W across ${current.devices.filter((device) => device.state.status === "on").length} active devices.`;
-    return json(context, {
-      conversationId: aiMessageMatch[1],
-      answer,
-      toolTrace: [{ tool: "get_office_snapshot", success: true }],
-      message
-    });
+    return buildAgentReply(context, message);
   }
 
   const aiActionMatch = path.match(/^\/api\/v1\/ai\/actions\/([^/]+)\/(confirm|cancel)$/);

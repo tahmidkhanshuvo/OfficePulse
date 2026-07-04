@@ -6,8 +6,8 @@
     "strict": true,
     "skipLibCheck": true,
     "noEmit": true,
-    "types": ["bun"],
     "ignoreDeprecations": "6.0",
+    "types": ["bun"],
     "baseUrl": ".",
     "paths": {
       "@officepulse/*": ["packages/*/src"]

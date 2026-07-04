@@ -42,6 +42,19 @@ describe("remaining backend phase contracts", () => {
     expect(repository.getActivity().some((item) => item.type === "alert.updated")).toBe(true);
   });
 
+  test("snoozed alerts are suppressed while the rule remains true", () => {
+    const repository = new InMemoryOfficeRepository(new Date("2026-07-03T09:00:00.000Z"));
+    const alert = repository.getAlerts().find((item) => item.type === "all_room_devices_on_long");
+    expect(alert).toBeDefined();
+
+    const suppressedUntil = new Date(Date.now() + 2 * 60 * 1000).toISOString();
+    const updated = repository.updateAlertStatus(alert!.id, "snoozed", { suppressedUntil });
+    repository.updateDeviceState("drawing-light-1", "on", "api");
+
+    expect(updated?.suppressedUntil).toBe(suppressedUntil);
+    expect(repository.getAlerts().filter((item) => item.id === alert!.id && item.status === "active")).toHaveLength(0);
+  });
+
   test("executes room shutdown and queues completed report", () => {
     const repository = new InMemoryOfficeRepository(new Date("2026-07-03T09:00:00.000Z"));
     const command = repository.shutdownRoom("drawing", "test", "contract-test");
