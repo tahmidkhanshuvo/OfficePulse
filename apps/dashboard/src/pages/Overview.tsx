@@ -5,6 +5,7 @@ import {
   commandDevice,
   emergencyShutdownOffice,
   getActivity,
+  getCurrentMonthEnergy,
   getOfficeClosingChecklist,
   shutdownOffice,
   withControlRetry,
@@ -83,26 +84,6 @@ const ROOMS: Room[] = [
       { id: "work2-light-2", label: "Light 2", defaultOn: true },
       { id: "work2-light-3", label: "Light 3", defaultOn: true },
     ],
-  },
-];
-
-const FALLBACK_ACTIVITY = [
-  {
-    time: "10:42 AM",
-    message: "Drawing Room Fan 1 turned",
-    emphasis: "OFF",
-    actor: "System",
-  },
-  {
-    time: "09:15 AM",
-    message: "Work Room 1 Main Lighting turned",
-    emphasis: "ON",
-    actor: "User: Admin",
-  },
-  {
-    time: "08:00 AM",
-    message: "Scheduled Mode: 'Daytime Operations' activated.",
-    actor: "Schedule",
   },
 ];
 
@@ -190,25 +171,54 @@ function buildRooms(snapshotRooms: OfficeSnapshot["rooms"] | undefined): Room[] 
   });
 }
 
-function tariffFromSnapshot(snapshot: OfficeSnapshot | null): number {
-  if (!snapshot || snapshot.energy.todayKwh <= 0) return 12;
-  const tariff = snapshot.energy.estimatedCostToday / snapshot.energy.todayKwh;
-  return Number.isFinite(tariff) && tariff > 0 ? tariff : 12;
-}
-
-function roomMonthlyForecast(snapshot: OfficeSnapshot | null) {
+function fallbackCurrentMonthBill(snapshot: OfficeSnapshot | null) {
   if (!snapshot) return [];
-  const tariff = tariffFromSnapshot(snapshot);
+  const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+  const elapsedMonthHours = Math.max(1, (Date.now() - monthStart.getTime()) / 3_600_000);
+  const tariff = snapshot.energy.todayKwh > 0 ? snapshot.energy.estimatedCostToday / snapshot.energy.todayKwh : 12;
   return snapshot.rooms.map((room) => {
-    const monthlyKwh = (room.powerWatts / 1000) * 24 * 30;
+    const energyKwh = (room.powerWatts / 1000) * elapsedMonthHours;
     return {
       roomId: room.room.slug,
-      name: room.room.name,
+      roomName: room.room.name,
       powerWatts: room.powerWatts,
-      monthlyKwh,
-      monthlyCost: monthlyKwh * tariff,
+      energyKwh,
+      cost: energyKwh * tariff,
     };
   });
+}
+
+function overviewActivityRows(activity: ActivityItem[], snapshot: OfficeSnapshot | null) {
+  if (activity.length > 0) {
+    return activity.map((item) => ({
+      id: item.id,
+      time: formatClock(item.occurredAt),
+      message: item.message,
+      actor: item.type.replace(/\./g, " "),
+    }));
+  }
+  if (!snapshot) return [];
+  const now = formatClock(snapshot.generatedAt);
+  return [
+    ...snapshot.alerts.map((alert) => ({
+      id: `alert-${alert.id}`,
+      time: formatClock(alert.updatedAt),
+      message: alert.message,
+      actor: "alert",
+    })),
+    {
+      id: "office-current",
+      time: now,
+      message: `Office total power ${snapshot.energy.totalPowerWatts.toFixed(2)}W, today ${snapshot.energy.todayKwh.toFixed(2)} kWh.`,
+      actor: "system",
+    },
+    ...snapshot.rooms.map((room) => ({
+      id: `room-${room.room.slug}`,
+      time: now,
+      message: `${room.room.name}: ${room.activeDeviceCount} devices on, ${room.powerWatts.toFixed(2)}W, occupancy ${room.occupancy.state.replace("_", " ")}.`,
+      actor: "sensor",
+    })),
+  ].slice(0, 6);
 }
 
 export function Overview({ onExit }: OverviewProps) {
@@ -219,6 +229,13 @@ export function Overview({ onExit }: OverviewProps) {
   const [checklist, setChecklist] = useState<{
     rooms: Array<{ roomId: RoomSlug; devicesOn: number; alerts: number; readyToClose: boolean }>;
     readyToClose: boolean;
+  } | null>(null);
+  const [monthBill, setMonthBill] = useState<{
+    currency: string;
+    month: string;
+    rooms: Array<{ roomId: RoomSlug; roomName: string; energyKwh: number; cost: number; powerWatts?: number }>;
+    totalKwh: number;
+    totalCost: number;
   } | null>(null);
   const rooms = useMemo(() => {
     const built = buildRooms(snapshot?.rooms);
@@ -231,16 +248,21 @@ export function Overview({ onExit }: OverviewProps) {
       })),
     }));
   }, [optimisticStatus, snapshot]);
-  const monthlyForecast = useMemo(() => roomMonthlyForecast(snapshot), [snapshot]);
-  const monthlyTotal = monthlyForecast.reduce((total, room) => total + room.monthlyCost, 0);
+  const currentMonthRooms = monthBill?.rooms ?? fallbackCurrentMonthBill(snapshot);
+  const currentMonthTotal = monthBill?.totalCost ?? currentMonthRooms.reduce((total, room) => total + room.cost, 0);
+  const currentMonthKwh = monthBill?.totalKwh ?? currentMonthRooms.reduce((total, room) => total + room.energyKwh, 0);
+  const activityRows = useMemo(() => overviewActivityRows(activity, snapshot), [activity, snapshot]);
 
   useEffect(() => {
     getActivity()
-      .then((next) => setActivity(next.items.slice(-6).reverse()))
+      .then((next) => setActivity(next.items.slice(0, 6)))
       .catch(() => setActivity([]));
     getOfficeClosingChecklist()
       .then(setChecklist)
       .catch(() => setChecklist(null));
+    getCurrentMonthEnergy()
+      .then(setMonthBill)
+      .catch(() => setMonthBill(null));
   }, [snapshot?.realtime.stateVersion]);
 
   const toggleDevice = async (deviceId: DeviceKey, next: boolean) => {
@@ -402,32 +424,27 @@ export function Overview({ onExit }: OverviewProps) {
                 </h3>
               </div>
               <div className="space-y-3 max-h-[172px] overflow-y-auto pr-2 custom-scrollbar">
-                {(activity.length > 0
-                  ? activity.map((item) => ({
-                      time: formatClock(item.occurredAt),
-                      message: item.message,
-                      actor: item.type.replace(/\./g, " "),
-                    }))
-                  : FALLBACK_ACTIVITY
-                ).map((row) => (
+                {activityRows.map((row) => (
                   <div
-                    key={`${row.time}-${row.message}`}
+                    key={row.id}
                     className="flex gap-4 items-start text-sm border-l border-white/20 pl-2 py-1"
                   >
                     <span className="font-metric-lg text-metric-lg text-text-secondary whitespace-nowrap w-20">
                       {row.time}
                     </span>
                     <span className="font-body-sm text-body-sm text-text-primary flex-1">
-                      {row.message}{" "}
-                      {"emphasis" in row && typeof row.emphasis === "string" ? (
-                        <strong className="text-text-secondary">{row.emphasis}</strong>
-                      ) : null}
+                      {row.message}
                     </span>
                     <span className="font-label-caps text-label-caps text-[#FF9D63] bg-surface-panel px-1 py-[2px] rounded uppercase border border-[#FF9D63]">
                       {row.actor}
                     </span>
                   </div>
                 ))}
+                {activityRows.length === 0 && (
+                  <div className="py-8 text-center font-body-sm text-body-sm text-text-secondary">
+                    Waiting for live activity...
+                  </div>
+                )}
               </div>
             </div>
 
@@ -436,42 +453,47 @@ export function Overview({ onExit }: OverviewProps) {
                 <div className="flex items-center gap-3">
                   <Icon name="payments" />
                   <h3 className="font-headline-md text-headline-md text-text-primary">
-                    Monthly Forecast
+                    Current Month Bill
                   </h3>
                 </div>
                 <span className="font-label-caps text-label-caps text-[#FF9D63] border border-[#FF9D63]/50 rounded-full px-2 py-1 uppercase">
-                  {snapshot?.energy.currency ?? "BDT"}
+                  Taka
                 </span>
               </div>
               <div className="space-y-2">
-                {(monthlyForecast.length > 0 ? monthlyForecast : rooms.map((room) => ({
+                {(currentMonthRooms.length > 0 ? currentMonthRooms : rooms.map((room) => ({
                   roomId: room.slug,
-                  name: room.name,
+                  roomName: room.name,
                   powerWatts: Number.parseFloat(room.drawValue) || 0,
-                  monthlyKwh: 0,
-                  monthlyCost: 0,
+                  energyKwh: 0,
+                  cost: 0,
                 }))).map((room) => (
                   <div key={room.roomId} className="rounded-lg border border-border-subtle bg-black/20 px-3 py-2">
                     <div className="flex items-center justify-between gap-3">
-                      <span className="font-body-sm text-body-sm text-text-primary">{room.name}</span>
+                      <span className="font-body-sm text-body-sm text-text-primary">{room.roomName}</span>
                       <span className="font-metric-lg text-[15px] leading-5 text-[#FF9D63]">
-                        {room.monthlyCost.toFixed(2)}
+                        Tk {room.cost.toFixed(2)}
                       </span>
                     </div>
                     <div className="mt-1 flex items-center justify-between font-label-caps text-label-caps text-text-secondary uppercase">
-                      <span>{formatWatts(room.powerWatts)}</span>
-                      <span>{room.monthlyKwh.toFixed(2)} kWh/mo</span>
+                      <span>{"powerWatts" in room && typeof room.powerWatts === "number" ? formatWatts(room.powerWatts) : monthBill?.month ?? "month-to-date"}</span>
+                      <span>{room.energyKwh.toFixed(2)} kWh used</span>
                     </div>
                   </div>
                 ))}
               </div>
               <div className="mt-3 flex items-center justify-between border-t border-border-subtle pt-3">
                 <span className="font-label-caps text-label-caps text-text-secondary uppercase">
-                  Estimated Total
+                  Month-to-date total
                 </span>
-                <span className="font-metric-lg text-metric-lg text-text-primary">
-                  {monthlyTotal.toFixed(2)}
-                </span>
+                <div className="text-right">
+                  <span className="block font-metric-lg text-metric-lg text-text-primary">
+                    Tk {currentMonthTotal.toFixed(2)}
+                  </span>
+                  <span className="block font-label-caps text-label-caps text-text-secondary uppercase">
+                    {currentMonthKwh.toFixed(2)} kWh
+                  </span>
+                </div>
               </div>
             </div>
           </section>

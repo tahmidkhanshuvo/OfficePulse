@@ -183,6 +183,10 @@ export class PersistentOfficeRepository extends InMemoryOfficeRepository {
     return this.persistence.getEnergyHistoryPoints(limit);
   }
 
+  async getCurrentMonthRoomEnergy(tariffPerKwh: number) {
+    return this.persistence.getCurrentMonthRoomEnergy(tariffPerKwh);
+  }
+
   private async persistSnapshot() {
     await this.persistence.persistSnapshot(
       buildOfficeSnapshot(this, this.persistence.snapshotOptions),
@@ -354,6 +358,65 @@ export class OfficePersistence {
         .reverse();
     } catch (cause) {
       this.logger?.warn("Unable to read energy telemetry history from database", errorContext(cause));
+      return [];
+    }
+  }
+
+  async getCurrentMonthRoomEnergy(tariffPerKwh: number): Promise<Array<{
+    roomId: Room["slug"];
+    roomName: string;
+    energyKwh: number;
+    cost: number;
+    currencyTariff: number;
+  }>> {
+    if (!this.sql) return [];
+    const monthStart = new Date();
+    monthStart.setDate(1);
+    monthStart.setHours(0, 0, 0, 0);
+    try {
+      const rows = (await this.sql`
+        SELECT device_id, status, power_watts, source, observed_at
+        FROM device_telemetry_events
+        WHERE observed_at >= ${monthStart.toISOString()}
+        ORDER BY device_id ASC, observed_at ASC
+      `) as PersistedTelemetryRow[];
+      const devices = seedDevices();
+      const rooms = new Map(seedRooms().map((room) => [room.slug, room]));
+      const devicesById = new Map(devices.map((device) => [device.id, device]));
+      const rowsByDevice = new Map<string, PersistedTelemetryRow[]>();
+      for (const row of rows) {
+        rowsByDevice.set(row.device_id, [...(rowsByDevice.get(row.device_id) ?? []), row]);
+      }
+
+      const kwhByRoom = new Map<Room["slug"], number>();
+      for (const [deviceId, points] of rowsByDevice) {
+        const device = devicesById.get(deviceId);
+        if (!device) continue;
+        let wattMs = 0;
+        for (let index = 0; index < points.length; index += 1) {
+          const current = points[index];
+          const next = points[index + 1];
+          const start = new Date(current.observed_at).getTime();
+          const end = next ? new Date(next.observed_at).getTime() : Date.now();
+          const span = Math.max(0, Math.min(end - start, 5 * 60 * 1000));
+          wattMs += Number(current.power_watts) * span;
+        }
+        const kwh = wattMs / 3_600_000 / 1000;
+        kwhByRoom.set(device.roomId, (kwhByRoom.get(device.roomId) ?? 0) + kwh);
+      }
+
+      return [...rooms.values()].map((room) => {
+        const energyKwh = Number((kwhByRoom.get(room.slug) ?? 0).toFixed(4));
+        return {
+          roomId: room.slug,
+          roomName: room.name,
+          energyKwh,
+          cost: Number((energyKwh * tariffPerKwh).toFixed(2)),
+          currencyTariff: tariffPerKwh
+        };
+      });
+    } catch (cause) {
+      this.logger?.warn("Unable to read month-to-date room energy from database", errorContext(cause));
       return [];
     }
   }

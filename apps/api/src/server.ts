@@ -240,12 +240,26 @@ function formatRoomName(roomId: string) {
   return roomId;
 }
 
-function estimateRoomMonthlyCost(powerWatts: number) {
-  const kwh = (powerWatts / 1000) * 24 * 30;
-  return {
-    kwh: Number(kwh.toFixed(2)),
-    cost: Number((kwh * config.defaultTariffPerKwh).toFixed(2))
-  };
+async function getCurrentMonthBilling() {
+  const persisted = await office.getCurrentMonthRoomEnergy(config.defaultTariffPerKwh);
+  if (persisted.length > 0 && persisted.some((room) => room.energyKwh > 0)) {
+    return persisted;
+  }
+  const current = buildOfficeSnapshot(office, snapshotOptions);
+  const elapsedMonthHours = Math.max(
+    1,
+    (Date.now() - new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime()) / 3_600_000
+  );
+  return current.rooms.map((room) => {
+    const energyKwh = Number(((room.powerWatts / 1000) * elapsedMonthHours).toFixed(4));
+    return {
+      roomId: room.room.slug,
+      roomName: room.room.name,
+      energyKwh,
+      cost: Number((energyKwh * config.defaultTariffPerKwh).toFixed(2)),
+      currencyTariff: config.defaultTariffPerKwh
+    };
+  });
 }
 
 async function buildAgentReply(context: RequestContext, message: string) {
@@ -328,14 +342,12 @@ async function buildAgentReply(context: RequestContext, message: string) {
   }
 
   if (/bill|monthly|cost|forecast/.test(lower)) {
-    const lines = current.rooms.map((room) => {
-      const estimate = estimateRoomMonthlyCost(room.powerWatts);
-      return `${room.room.name}: ${estimate.kwh} kWh, ${estimate.cost} ${config.currency}`;
-    });
+    const billing = await getCurrentMonthBilling();
+    const lines = billing.map((room) => `${room.roomName}: ${room.energyKwh.toFixed(2)} kWh, ${room.cost.toFixed(2)} ${config.currency}`);
     toolTrace.push({ tool: "get_usage_summary", success: true });
     return json(context, {
       conversationId: context.url.pathname.split("/")[5] ?? "pulse",
-      answer: `Estimated monthly bill at current load: ${lines.join("; ")}.`,
+      answer: `Current month bill so far: ${lines.join("; ")}.`,
       toolTrace,
       message
     });
@@ -766,6 +778,18 @@ async function route(context: RequestContext): Promise<Response> {
 
   if (method === "GET" && path === "/api/v1/energy/today") {
     return json(context, snapshot(context).energy);
+  }
+
+  if (method === "GET" && path === "/api/v1/energy/month-to-date") {
+    const rooms = await getCurrentMonthBilling();
+    return json(context, {
+      currency: config.currency,
+      tariffPerKwh: config.defaultTariffPerKwh,
+      month: new Date().toISOString().slice(0, 7),
+      rooms,
+      totalKwh: Number(rooms.reduce((total, room) => total + room.energyKwh, 0).toFixed(4)),
+      totalCost: Number(rooms.reduce((total, room) => total + room.cost, 0).toFixed(2))
+    });
   }
 
   if (method === "GET" && path === "/api/v1/energy/rankings") {

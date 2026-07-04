@@ -126,10 +126,6 @@ export function commandDevice(deviceId: string, action: "on" | "off") {
   });
 }
 
-export function shutdownRoom(roomId: RoomSlug) {
-  return api(`/api/v1/rooms/${roomId}/commands/shutdown`, { method: "POST" });
-}
-
 export function shutdownOffice() {
   return api("/api/v1/office/commands/shutdown", { method: "POST" });
 }
@@ -170,11 +166,21 @@ export function getDeviceTelemetry(deviceId: string, limit = 48) {
   }>(`/api/v1/devices/${deviceId}/telemetry?limit=${limit}`);
 }
 
-export function getEnergyHistory() {
+export function getCurrentMonthEnergy() {
   return api<{
-    granularity: string;
-    points: Array<{ recordedAt: string; powerWatts: number; estimatedKwh: number }>;
-  }>("/api/v1/energy/history");
+    currency: string;
+    tariffPerKwh: number;
+    month: string;
+    rooms: Array<{
+      roomId: RoomSlug;
+      roomName: string;
+      energyKwh: number;
+      cost: number;
+      currencyTariff: number;
+    }>;
+    totalKwh: number;
+    totalCost: number;
+  }>("/api/v1/energy/month-to-date");
 }
 
 export function getEnergyRankings() {
@@ -226,11 +232,11 @@ export function getReports() {
   return api<{ reports: ReportRequest[] }>("/api/v1/reports");
 }
 
-export function reportDownloadUrl(format: "csv" | "pdf") {
+function reportDownloadUrl(format: "csv" | "pdf") {
   return `${API_BASE_URL}/api/v1/reports/downloads/${format}/latest`;
 }
 
-export function reportDownloadByIdUrl(reportId: string) {
+function reportDownloadByIdUrl(reportId: string) {
   return `${API_BASE_URL}/api/v1/reports/${encodeURIComponent(reportId)}/download`;
 }
 
@@ -307,10 +313,4 @@ export async function withControlRetry<T>(operation: () => Promise<T>): Promise<
     await verifyControlPin(pin);
     return operation();
   }
-}
-
-export function roomSlugFromName(name: string): RoomSlug {
-  if (name.toLowerCase().includes("work room 1")) return "work1";
-  if (name.toLowerCase().includes("work room 2")) return "work2";
-  return "drawing";
 }
