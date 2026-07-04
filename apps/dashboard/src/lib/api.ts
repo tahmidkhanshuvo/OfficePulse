@@ -85,6 +85,15 @@ export function deleteSession() {
   return api<{ authenticated: boolean }>("/api/v1/auth/session", { method: "DELETE" });
 }
 
+export function getSession() {
+  return api<{
+    authenticated: boolean;
+    expiresAt: string | null;
+    idleExpiresAt: string | null;
+    controlAuthorized: boolean;
+  }>("/api/v1/auth/session");
+}
+
 export function getBootstrap() {
   return api<OfficeSnapshot>("/api/v1/bootstrap");
 }

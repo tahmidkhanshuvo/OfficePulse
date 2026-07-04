@@ -12,7 +12,7 @@ import { Support } from "./pages/Support";
 import { PrivacyPolicy } from "./pages/PrivacyPolicy";
 import { Terms } from "./pages/Terms";
 import { ContactSupport } from "./pages/ContactSupport";
-import { deleteSession } from "./lib/api";
+import { deleteSession, getSession } from "./lib/api";
 
 type Route =
   | "login"
@@ -26,6 +26,11 @@ type Route =
   | "privacy"
   | "terms"
   | "contact";
+
+function hasRouteHash(): boolean {
+  if (typeof window === "undefined") return false;
+  return window.location.hash.replace(/^#\/?/, "").trim().length > 0;
+}
 
 function readRoute(): Route {
   if (typeof window === "undefined") return "login";
@@ -43,7 +48,24 @@ function readRoute(): Route {
 }
 
 function App() {
-  const [route, setRoute] = React.useState<Route>(readRoute);
+  const [route, setRoute] = React.useState<Route | "checking">(() => (hasRouteHash() ? readRoute() : "checking"));
+
+  React.useEffect(() => {
+    if (hasRouteHash()) return;
+    let cancelled = false;
+    getSession()
+      .then((session) => {
+        if (cancelled) return;
+        window.location.replace(session.authenticated ? "#/overview" : "#/login");
+      })
+      .catch(() => {
+        if (cancelled) return;
+        window.location.replace("#/login");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   React.useEffect(() => {
     const onHashChange = () => setRoute(readRoute());
@@ -56,6 +78,16 @@ function App() {
       window.location.hash = "#/login";
     });
   };
+
+  if (route === "checking") {
+    return (
+      <div className="min-h-screen bg-bg-deep text-text-primary antialiased flex items-center justify-center">
+        <div className="rounded-xl border border-white/10 bg-black/40 px-5 py-4 font-label-caps text-label-caps uppercase text-text-secondary backdrop-blur-2xl">
+          Opening OfficePulse
+        </div>
+      </div>
+    );
+  }
 
   if (route === "analytics") {
     return (
