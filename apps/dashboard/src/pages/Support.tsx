@@ -1,4 +1,4 @@
-import { BrandMark } from "../components/BrandMark";
+import { GlassPanel, PublicPageShell } from "../components/PublicPageChrome";
 
 type FaqItem = {
   q: string;
@@ -8,7 +8,7 @@ type FaqItem = {
 const FAQS: FaqItem[] = [
   {
     q: "How do I sign in to OfficePulse?",
-    a: "Open the dashboard and enter the Administrator ID and security key configured by your admin. The session remains active until logout or the configured idle timeout expires.",
+    a: "Enter the administrator PIN on the login page. The session remains active until logout or the configured idle timeout expires.",
   },
   {
     q: "Where do I see live power and device status?",
@@ -30,115 +30,93 @@ const FAQS: FaqItem[] = [
 
 export function Support() {
   return (
-    <div className="min-h-screen flex flex-col text-text-primary antialiased bg-bg-deep relative overflow-hidden">
-      <div className="absolute inset-0 pointer-events-none flex justify-center items-center z-0 opacity-20">
-        <div className="w-[800px] h-[800px] bg-secondary-container rounded-full blur-[120px] mix-blend-screen opacity-10 animate-pulse" />
-      </div>
+    <PublicPageShell backFallback="#/login">
+        <GlassPanel className="p-6 sm:p-8">
+          <div className="flex flex-col justify-between gap-6 lg:flex-row lg:items-end">
+            <div className="max-w-2xl">
+              <div className="inline-flex items-center gap-2 rounded-full border border-[#FF9D63]/30 bg-[#FF9D63]/10 px-3 py-1 font-label-caps text-label-caps uppercase text-[#FF9D63]">
+                <span className="h-1.5 w-1.5 rounded-full bg-[#FF9D63]" />
+                Help Center
+              </div>
+              <h1 className="mt-5 text-[34px] font-semibold leading-tight text-white sm:text-[44px]">
+                Support
+              </h1>
+              <p className="mt-3 max-w-xl font-body-base text-body-base text-text-secondary">
+                Quick help for sign-in, live telemetry, alerts, controls, and reports.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-3">
+              <a
+                href="#/contact"
+                className="inline-flex items-center gap-2 rounded-lg bg-[#FF9D63] px-4 py-3 font-body-sm text-body-sm font-semibold text-black transition-colors hover:bg-[#FFB07F]"
+              >
+                Contact Support
+                <span className="material-symbols-outlined text-[18px]" style={{ color: "#000" }}>
+                  arrow_forward
+                </span>
+              </a>
+              <a
+                href="#/login"
+                className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-[#111111]/70 px-4 py-3 font-body-sm text-body-sm font-semibold text-text-primary transition-colors hover:border-[#FF9D63]/50"
+              >
+                Login
+              </a>
+            </div>
+          </div>
+        </GlassPanel>
 
-      {/* Top bar */}
-      <header className="relative z-10 w-full flex items-center justify-between px-margin-desktop py-6 border-b border-border-subtle">
-        <a href="#/login" className="flex items-center gap-3">
-          <BrandMark />
-          <span className="font-headline-md text-headline-md">OfficePulse</span>
-        </a>
-        <a
-          href="#/login"
-          className="font-label-caps text-label-caps uppercase text-text-secondary hover:text-text-primary transition-colors flex items-center gap-2"
-        >
-          <span className="material-symbols-outlined text-[18px]">arrow_back</span>
-          Back to Login
-        </a>
-      </header>
-
-      {/* Content */}
-      <main className="relative z-10 flex-1 w-full max-w-3xl mx-auto px-6 py-12 flex flex-col gap-8">
-        <div>
-          <span className="font-label-caps text-label-caps uppercase text-text-secondary">
-            Help Center
-          </span>
-          <h1 className="font-headline-lg text-headline-lg text-text-primary mt-2">
-            Support
-          </h1>
-          <p className="font-body-base text-body-base text-text-secondary mt-3">
-            Quick answers for the most common questions about OfficePulse. If you
-            need hands-on help, reach the team via the Contact Support page.
-          </p>
-        </div>
-
-        {/* Quick links */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <section className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <a
             href="#/contact"
-            className="bg-surface-panel border border-border-subtle rounded-xl p-4 flex flex-col gap-2 hover:border-[#FF9D63]/60 transition-colors"
+            className="rounded-xl border border-white/10 bg-[#111111]/70 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] backdrop-blur-2xl transition-colors hover:border-[#FF9D63]/60"
           >
             <span className="material-symbols-outlined">support_agent</span>
-            <span className="font-headline-md text-headline-md">Contact</span>
-            <span className="font-body-sm text-body-sm text-text-secondary">
-              Reach the maintainers directly.
-            </span>
+            <span className="mt-3 block font-headline-md text-headline-md">Contact</span>
+            <span className="mt-1 block font-body-sm text-body-sm text-text-secondary">Reach the maintainers.</span>
           </a>
           <a
             href="#/privacy"
-            className="bg-surface-panel border border-border-subtle rounded-xl p-4 flex flex-col gap-2 hover:border-[#FF9D63]/60 transition-colors"
+            className="rounded-xl border border-white/10 bg-[#111111]/70 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] backdrop-blur-2xl transition-colors hover:border-[#FF9D63]/60"
           >
             <span className="material-symbols-outlined">shield</span>
-            <span className="font-headline-md text-headline-md">Privacy</span>
-            <span className="font-body-sm text-body-sm text-text-secondary">
-              Read the privacy policy.
-            </span>
+            <span className="mt-3 block font-headline-md text-headline-md">Privacy</span>
+            <span className="mt-1 block font-body-sm text-body-sm text-text-secondary">Data and telemetry policy.</span>
           </a>
           <a
             href="#/terms"
-            className="bg-surface-panel border border-border-subtle rounded-xl p-4 flex flex-col gap-2 hover:border-[#FF9D63]/60 transition-colors"
+            className="rounded-xl border border-white/10 bg-[#111111]/70 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] backdrop-blur-2xl transition-colors hover:border-[#FF9D63]/60"
           >
             <span className="material-symbols-outlined">description</span>
-            <span className="font-headline-md text-headline-md">Terms</span>
-            <span className="font-body-sm text-body-sm text-text-secondary">
-              Read the terms of service.
-            </span>
+            <span className="mt-3 block font-headline-md text-headline-md">Terms</span>
+            <span className="mt-1 block font-body-sm text-body-sm text-text-secondary">Service terms.</span>
           </a>
-        </div>
+        </section>
 
-        {/* FAQ */}
-        <section className="flex flex-col gap-4">
-          <h2 className="font-headline-md text-headline-md text-text-primary border-b border-border-subtle pb-3">
-            Frequently Asked Questions
-          </h2>
-          <ul className="flex flex-col gap-3">
+        <GlassPanel className="p-4 sm:p-6">
+          <div className="mb-4 flex items-center gap-3 border-b border-white/10 pb-4">
+            <span className="material-symbols-outlined">help</span>
+            <h2 className="font-headline-md text-headline-md text-text-primary">FAQ</h2>
+          </div>
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
             {FAQS.map((item) => (
-              <li
+              <details
                 key={item.q}
-                className="bg-surface-panel border border-border-subtle rounded-xl p-5"
+                className="group rounded-lg border border-white/10 bg-[#111111]/70 p-4 transition-colors open:border-[#FF9D63]/40"
               >
-                <p className="font-headline-md text-headline-md text-text-primary">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-4 font-body-base text-body-base font-semibold text-text-primary">
                   {item.q}
-                </p>
-                <p className="font-body-base text-body-base text-text-secondary mt-2 leading-relaxed">
+                  <span className="material-symbols-outlined text-[18px] transition-transform group-open:rotate-180">
+                    expand_more
+                  </span>
+                </summary>
+                <p className="mt-3 font-body-sm text-body-sm leading-relaxed text-text-secondary">
                   {item.a}
                 </p>
-              </li>
+              </details>
             ))}
-          </ul>
-        </section>
-      </main>
-
-      <footer className="relative z-10 w-full flex flex-col md:flex-row justify-between items-center px-margin-desktop py-6 border-t border-border-subtle">
-        <p className="font-body-sm text-body-sm text-text-secondary">
-          © 2026 OfficePulse. Developed by Team If_it_works_it_works.
-        </p>
-        <nav className="flex gap-4 mt-2 md:mt-0 font-label-caps text-label-caps text-text-secondary">
-          <a className="hover:text-text-primary transition-colors" href="#/privacy">
-            Privacy Policy
-          </a>
-          <a className="hover:text-text-primary transition-colors" href="#/terms">
-            Terms of Service
-          </a>
-          <a className="hover:text-text-primary transition-colors" href="#/contact">
-            Contact Support
-          </a>
-        </nav>
-      </footer>
-    </div>
+          </div>
+        </GlassPanel>
+    </PublicPageShell>
   );
 }
 

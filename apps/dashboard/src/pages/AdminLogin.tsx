@@ -30,7 +30,7 @@ export function AdminLogin() {
         className="relative flex min-h-screen items-center justify-center px-4 py-8 sm:px-6 lg:px-10"
         style={{
           backgroundImage:
-            "linear-gradient(rgba(255,255,255,0.045) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.035) 1px, transparent 1px), linear-gradient(135deg, rgba(255,157,99,0.10), transparent 34%, rgba(255,255,255,0.035))",
+            "linear-gradient(rgba(255,255,255,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px), linear-gradient(135deg, rgba(255,157,99,0.13), transparent 32%, rgba(0,0,0,0.35))",
           backgroundSize: "56px 56px, 56px 56px, 100% 100%"
         }}
       >
@@ -38,40 +38,39 @@ export function AdminLogin() {
         <div className="absolute inset-y-0 left-0 hidden w-px bg-white/10 lg:block" />
         <div className="absolute inset-y-0 right-0 hidden w-px bg-white/10 lg:block" />
 
-        <section className="relative w-full max-w-6xl rounded-xl border border-white/10 bg-black/35 shadow-[0_28px_110px_rgba(0,0,0,0.72)] backdrop-blur-2xl">
-          <div className="grid min-h-[620px] grid-cols-1 lg:grid-cols-[1.08fr_0.92fr]">
+        <section className="relative w-full max-w-5xl rounded-xl border border-white/10 bg-black/40 shadow-[0_28px_110px_rgba(0,0,0,0.72)] backdrop-blur-2xl">
+          <div className="grid min-h-[560px] grid-cols-1 lg:grid-cols-[1.05fr_0.95fr]">
             <div className="flex flex-col justify-between border-b border-white/10 p-6 sm:p-8 lg:border-b-0 lg:border-r lg:p-10">
               <div>
                 <BrandMark className="h-16 w-auto" width={190} height={130} />
-                <div className="mt-10 max-w-xl">
+                <div className="mt-12 max-w-xl">
                   <div className="inline-flex items-center gap-2 rounded-full border border-[#FF9D63]/30 bg-[#FF9D63]/10 px-3 py-1 font-label-caps text-label-caps uppercase text-[#FF9D63]">
                     <span className="h-1.5 w-1.5 rounded-full bg-[#FF9D63]" />
                     Admin Console
                   </div>
-                  <h1 className="mt-5 max-w-lg text-[34px] font-semibold leading-[1.08] text-white sm:text-[44px]">
-                    Office control, live telemetry, and protected access.
+                  <h1 className="mt-5 max-w-md text-[34px] font-semibold leading-[1.08] text-white sm:text-[44px]">
+                    OfficePulse control.
                   </h1>
-                  <p className="mt-4 max-w-md font-body-base text-body-base text-text-secondary">
-                    Sign in to manage the running office system with realtime device state, alerts, logs, reports, and simulations.
+                  <p className="mt-4 max-w-sm font-body-base text-body-base text-text-secondary">
+                    Live office systems, protected behind one PIN.
                   </p>
                 </div>
               </div>
 
-              <div className="mt-10 grid grid-cols-1 gap-3 sm:grid-cols-3 lg:max-w-2xl">
-                <StatusTile icon="bolt" label="Telemetry" value="Live" tone="orange" />
-                <StatusTile icon="shield" label="Control" value="PIN locked" tone="neutral" />
-                <StatusTile icon="monitoring" label="System" value="Online" tone="green" />
+              <div className="mt-10 grid grid-cols-3 gap-3 lg:max-w-xl">
+                <StatusTile icon="bolt" value="Live" tone="orange" />
+                <StatusTile icon="shield" value="Locked" tone="neutral" />
+                <StatusTile icon="monitoring" value="Online" tone="green" />
               </div>
             </div>
 
             <div className="flex items-center justify-center p-6 sm:p-8 lg:p-10">
               <div className="w-full max-w-md">
-                <div className="mb-4 rounded-xl border border-white/10 bg-white/[0.035] p-3 backdrop-blur-xl">
+                <div className="mb-4 rounded-xl border border-white/10 bg-[#111111]/65 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] backdrop-blur-2xl">
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <p className="font-label-caps text-label-caps uppercase text-text-secondary">Session</p>
                       <p className="mt-1 font-body-base text-body-base font-semibold text-text-primary">
-                        Protected admin entry
+                        Secure session
                       </p>
                     </div>
                     <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-[#FF9D63]/30 bg-[#FF9D63]/10">
@@ -82,18 +81,14 @@ export function AdminLogin() {
 
                 <form
                   onSubmit={handleSubmit}
-                  className="rounded-xl border border-white/10 bg-[#111111]/70 p-6 shadow-[0_24px_70px_rgba(0,0,0,0.55)] backdrop-blur-2xl"
+                  className="rounded-xl border border-white/10 bg-[#111111]/75 p-6 shadow-[0_24px_70px_rgba(0,0,0,0.55)] backdrop-blur-2xl"
                 >
                   <div className="mb-6">
-                    <div className="flex items-center gap-2 font-label-caps text-label-caps uppercase text-text-secondary">
-                      <span className="h-2 w-2 rounded-full bg-[#FF9D63]" />
-                      Secure Session
-                    </div>
-                    <h2 className="mt-3 font-headline-md text-headline-md text-text-primary">
-                      Sign in to OfficePulse
+                    <h2 className="font-headline-md text-headline-md text-text-primary">
+                      Sign in
                     </h2>
                     <p className="mt-2 font-body-sm text-body-sm text-text-secondary">
-                      Enter the administrator PIN to unlock the dashboard.
+                      Enter administrator PIN.
                     </p>
                   </div>
 
@@ -101,7 +96,7 @@ export function AdminLogin() {
                     <label className="font-label-caps text-label-caps uppercase text-text-secondary" htmlFor="security-key">
                       Administrator PIN
                     </label>
-                    <div className="relative rounded-lg border border-white/15 bg-black/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-colors focus-within:border-[#FF9D63]/80">
+                    <div className="relative rounded-lg border border-white/15 bg-black/55 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-colors focus-within:border-[#FF9D63]/80">
                       <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[18px]">
                         key
                       </span>
@@ -147,7 +142,7 @@ export function AdminLogin() {
                   </button>
 
                   <div className="mt-5 flex items-center justify-between border-t border-white/10 pt-4 font-body-sm text-body-sm text-text-secondary">
-                    <span>Controls activate after sign-in.</span>
+                    <span>Protected controls</span>
                     <a href="#/support" className="text-[#FF9D63] transition-colors hover:text-[#FFB07F]">
                       Support
                     </a>
@@ -164,12 +159,10 @@ export function AdminLogin() {
 
 function StatusTile({
   icon,
-  label,
   value,
   tone
 }: {
   icon: string;
-  label: string;
   value: string;
   tone: "orange" | "green" | "neutral";
 }) {
@@ -177,19 +170,16 @@ function StatusTile({
     tone === "orange"
       ? "border-[#FF9D63]/30 bg-[#FF9D63]/10 text-[#FF9D63]"
       : tone === "green"
-        ? "border-emerald-400/25 bg-emerald-400/10 text-emerald-300"
-        : "border-white/10 bg-white/[0.04] text-text-primary";
+        ? "border-[#FF9D63]/25 bg-[#FF9D63]/10 text-[#FFB07F]"
+        : "border-white/10 bg-black/25 text-text-primary";
 
   return (
-    <div className="rounded-lg border border-white/10 bg-white/[0.035] p-3 backdrop-blur-xl">
-      <div className="flex items-center gap-3">
+    <div className="rounded-lg border border-white/10 bg-[#111111]/65 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] backdrop-blur-2xl">
+      <div className="flex items-center justify-center gap-2">
         <div className={`flex h-9 w-9 items-center justify-center rounded-lg border ${toneClass}`}>
           <span className="material-symbols-outlined text-[18px]">{icon}</span>
         </div>
-        <div className="min-w-0">
-          <div className="font-label-caps text-label-caps uppercase text-text-secondary">{label}</div>
-          <div className="mt-1 truncate font-body-base text-body-base font-semibold text-text-primary">{value}</div>
-        </div>
+        <div className="truncate font-body-sm text-body-sm font-semibold text-text-primary">{value}</div>
       </div>
     </div>
   );
