@@ -256,13 +256,13 @@ export function Overview({ onExit }: OverviewProps) {
   const refreshOverviewData = useCallback(() => {
     getActivity()
       .then((next) => setActivity(next.items.slice(0, 6)))
-      .catch(() => setActivity([]));
+      .catch(() => undefined);
     getOfficeClosingChecklist()
       .then(setChecklist)
-      .catch(() => setChecklist(null));
+      .catch(() => undefined);
     getCurrentMonthEnergy()
       .then(setMonthBill)
-      .catch(() => setMonthBill(null));
+      .catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -336,7 +336,7 @@ export function Overview({ onExit }: OverviewProps) {
               <p className="font-body-base text-body-base text-text-secondary mt-1">
                 Real-time power distribution and active device status across all primary zones.
               </p>
-              {snapshotError && (
+              {snapshotError && !snapshot && (
                 <p className="font-body-sm text-body-sm text-[#FF9D63] mt-2">
                   Showing fallback device layout until live office data loads.
                 </p>

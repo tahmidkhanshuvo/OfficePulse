@@ -1,4 +1,4 @@
-import { createContext, createElement, type ReactNode, useCallback, useContext, useEffect, useState } from "react";
+import { createContext, createElement, type ReactNode, useCallback, useContext, useEffect, useRef, useState } from "react";
 import type { OfficeSnapshot } from "../../../../packages/contracts/src";
 import { getBootstrap } from "../lib/api";
 
@@ -15,14 +15,18 @@ function useOfficeSnapshotState(): OfficeSnapshotState {
   const [snapshot, setSnapshot] = useState<OfficeSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const hasLoadedSnapshot = useRef(false);
 
   const refresh = useCallback(async () => {
     try {
       setError(null);
       const next = await getBootstrap();
+      hasLoadedSnapshot.current = true;
       setSnapshot(next);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Unable to load office data.");
+      if (!hasLoadedSnapshot.current) {
+        setError(cause instanceof Error ? cause.message : "Unable to load office data.");
+      }
     } finally {
       setLoading(false);
     }
