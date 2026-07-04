@@ -15,6 +15,7 @@ import { createLogger } from "../../../packages/logger/src";
 import { checkRedisHealth } from "../../../packages/redis/src";
 import { DeviceTelemetryGenerator } from "./device-telemetry-generator";
 
+const dashboardDist = new URL("../../dashboard/dist/", import.meta.url);
 const config = loadConfig();
 const logger = createLogger("api");
 const snapshotOptions = {
@@ -120,6 +121,51 @@ function fileResponse(context: RequestContext, body: string, contentType: string
       "content-type": contentType,
       "content-disposition": `attachment; filename="${filename}"`
     })
+  });
+}
+
+const staticContentTypes: Record<string, string> = {
+  ".css": "text/css; charset=utf-8",
+  ".html": "text/html; charset=utf-8",
+  ".ico": "image/x-icon",
+  ".js": "text/javascript; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".map": "application/json; charset=utf-8",
+  ".png": "image/png",
+  ".svg": "image/svg+xml",
+  ".webmanifest": "application/manifest+json; charset=utf-8",
+  ".webp": "image/webp"
+};
+
+function isApiPath(path: string): boolean {
+  return path === "/health" || path === "/ready" || path === "/ws" || path.startsWith("/api/") || path.startsWith("/internal/");
+}
+
+function contentTypeForPath(path: string): string {
+  const match = path.match(/\.[a-z0-9]+$/i);
+  return match ? staticContentTypes[match[0].toLowerCase()] ?? "application/octet-stream" : "application/octet-stream";
+}
+
+async function serveDashboard(request: Request): Promise<Response> {
+  const url = new URL(request.url);
+  const normalizedPath = decodeURIComponent(url.pathname).replace(/^\/+/, "");
+  const safePath = normalizedPath.includes("..") || normalizedPath.length === 0 ? "index.html" : normalizedPath;
+  const target = Bun.file(new URL(safePath, dashboardDist));
+  if (await target.exists()) {
+    return new Response(target, {
+      headers: {
+        "content-type": contentTypeForPath(safePath),
+        "cache-control": safePath === "index.html" ? "no-cache" : "public, max-age=31536000, immutable"
+      }
+    });
+  }
+
+  const index = Bun.file(new URL("index.html", dashboardDist));
+  return new Response(index, {
+    headers: {
+      "content-type": "text/html; charset=utf-8",
+      "cache-control": "no-cache"
+    }
   });
 }
 
@@ -979,6 +1025,10 @@ const server = Bun.serve<{ sessionId: string }>({
   hostname: "0.0.0.0",
   async fetch(request, server) {
     const context = makeContext(request);
+
+    if (!isApiPath(context.url.pathname)) {
+      return serveDashboard(request);
+    }
 
     if (context.url.pathname === "/ws") {
       if (!context.session) {
