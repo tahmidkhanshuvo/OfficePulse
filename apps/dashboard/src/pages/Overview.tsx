@@ -211,12 +211,14 @@ export function Overview({ onExit }: OverviewProps) {
   const { snapshot, refresh } = useOfficeSnapshot();
   const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [alertError, setAlertError] = useState<string | null>(null);
+  const [hiddenAlertIds, setHiddenAlertIds] = useState<Set<string>>(() => new Set());
   const [checklist, setChecklist] = useState<{
     rooms: Array<{ roomId: RoomSlug; devicesOn: number; alerts: number; readyToClose: boolean }>;
     readyToClose: boolean;
   } | null>(null);
   const rooms = useMemo(() => buildRooms(snapshot?.rooms), [snapshot]);
-  const alerts = snapshot?.alerts ?? [];
+  const alerts = (snapshot?.alerts ?? []).filter((alert) => alert.status === "active" && !hiddenAlertIds.has(alert.id));
 
   useEffect(() => {
     getActivity()
@@ -239,9 +241,13 @@ export function Overview({ onExit }: OverviewProps) {
 
   const handleAlertAction = async (alert: Alert, action: "acknowledge" | "resolve" | "snooze" | "mute") => {
     setBusyId(alert.id);
+    setAlertError(null);
     try {
       await withControlRetry(() => updateAlert(alert.id, action));
+      setHiddenAlertIds((current) => new Set(current).add(alert.id));
       await refresh();
+    } catch (cause) {
+      setAlertError(cause instanceof Error ? cause.message : "Unable to update alert. Confirm the control PIN and try again.");
     } finally {
       setBusyId(null);
     }
@@ -260,9 +266,13 @@ export function Overview({ onExit }: OverviewProps) {
   const shutdownAlertRoom = async (alert: Alert) => {
     if (!alert.roomId) return;
     setBusyId(alert.id);
+    setAlertError(null);
     try {
       await withControlRetry(() => shutdownRoom(alert.roomId!));
+      setHiddenAlertIds((current) => new Set(current).add(alert.id));
       await refresh();
+    } catch (cause) {
+      setAlertError(cause instanceof Error ? cause.message : "Unable to turn off room devices. Confirm the control PIN and try again.");
     } finally {
       setBusyId(null);
     }
@@ -487,7 +497,7 @@ export function Overview({ onExit }: OverviewProps) {
         </div>
 
         {/* Right Alerts Panel */}
-        <aside className="w-full md:w-80 md:min-h-0 bg-surface-panel border-l border-border-subtle flex flex-col md:overflow-hidden">
+        <aside className="w-full md:w-96 md:min-h-0 bg-surface-panel border-l border-border-subtle flex flex-col md:overflow-hidden">
           <div className="shrink-0 p-4 border-b border-border-subtle flex justify-between items-center  backdrop-blur-[20px] z-10">
             <h2 className="font-headline-md text-headline-md text-text-primary flex items-center gap-3">
               <span className="material-symbols-outlined">warning</span>
@@ -498,28 +508,33 @@ export function Overview({ onExit }: OverviewProps) {
             </span>
           </div>
           <div className="flex-1 md:min-h-0 p-4 space-y-4 md:overflow-y-auto custom-scrollbar">
+            {alertError && (
+              <p className="font-body-sm text-body-sm text-[#FF9D63] border border-[#FF9D63]/40 bg-[#FF9D63]/10 rounded-lg px-3 py-2">
+                {alertError}
+              </p>
+            )}
             {(alerts.length > 0 ? alerts : []).map((alert) => (
               <div
                 key={alert.id}
                 className="bg-surface-panel border border-border-subtle rounded-lg p-3"
               >
-                <div className="flex justify-between items-start mb-1">
-                  <span className="font-label-caps text-label-caps text-text-primary uppercase font-bold">
+                <div className="flex justify-between items-start gap-3 mb-1">
+                  <span className="font-label-caps text-label-caps text-text-primary uppercase font-bold min-w-0 break-words">
                     {alert.title}
                   </span>
-                  <span className="font-metric-lg text-metric-lg text-text-secondary">
+                  <span className="font-metric-lg text-metric-lg text-text-secondary shrink-0">
                     {formatAlertTime(alert.createdAt)}
                   </span>
                 </div>
                 <p className="font-body-sm text-body-sm text-text-secondary mb-3">
                   {alert.message}
                 </p>
-                <div className="flex gap-3">
+                <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
                     disabled={busyId === alert.id}
                     onClick={() => handleAlertAction(alert, "acknowledge")}
-                    className="bg-surface-panel text-[#FF9D63] border border-[#FF9D63] px-3 py-1 rounded text-xs font-label-caps uppercase hover:bg-[#FF9D63]/10 transition-colors disabled:opacity-50"
+                    className="w-full bg-surface-panel text-[#FF9D63] border border-[#FF9D63] px-2 py-2 rounded text-xs font-label-caps uppercase hover:bg-[#FF9D63]/10 transition-colors disabled:opacity-50"
                   >
                     Acknowledge
                   </button>
@@ -527,7 +542,7 @@ export function Overview({ onExit }: OverviewProps) {
                     type="button"
                     disabled={busyId === alert.id}
                     onClick={() => (alert.roomId ? shutdownAlertRoom(alert) : handleAlertAction(alert, "resolve"))}
-                    className="bg-[#FF9D63] text-black px-3 py-1 rounded text-xs font-label-caps uppercase hover:opacity-90 transition-opacity disabled:opacity-50"
+                    className="w-full bg-[#FF9D63] text-black px-2 py-2 rounded text-xs font-label-caps uppercase hover:opacity-90 transition-opacity disabled:opacity-50"
                   >
                     {alert.roomId ? "Turn Off" : "Resolve"}
                   </button>
@@ -535,7 +550,7 @@ export function Overview({ onExit }: OverviewProps) {
                     type="button"
                     disabled={busyId === alert.id}
                     onClick={() => handleAlertAction(alert, "snooze")}
-                    className="bg-surface-panel text-text-secondary border border-border-subtle px-3 py-1 rounded text-xs font-label-caps uppercase hover:text-[#FF9D63] hover:border-[#FF9D63]/50 transition-colors disabled:opacity-50"
+                    className="w-full bg-surface-panel text-text-secondary border border-border-subtle px-2 py-2 rounded text-xs font-label-caps uppercase hover:text-[#FF9D63] hover:border-[#FF9D63]/50 transition-colors disabled:opacity-50"
                   >
                     Snooze
                   </button>
@@ -543,7 +558,7 @@ export function Overview({ onExit }: OverviewProps) {
                     type="button"
                     disabled={busyId === alert.id}
                     onClick={() => handleAlertAction(alert, "mute")}
-                    className="bg-surface-panel text-text-secondary border border-border-subtle px-3 py-1 rounded text-xs font-label-caps uppercase hover:text-[#FF9D63] hover:border-[#FF9D63]/50 transition-colors disabled:opacity-50"
+                    className="w-full bg-surface-panel text-text-secondary border border-border-subtle px-2 py-2 rounded text-xs font-label-caps uppercase hover:text-[#FF9D63] hover:border-[#FF9D63]/50 transition-colors disabled:opacity-50"
                   >
                     Mute
                   </button>

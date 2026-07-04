@@ -94,27 +94,30 @@ export function DashboardChrome({
             </span>
           </div>
           <div className="flex gap-3">
-            <button
-              type="button"
-              aria-label="Quick action"
+            <a
+              href="#/overview"
+              aria-label="Overview"
+              title="Overview"
               className="p-1 text-text-secondary hover:text-text-primary transition-colors duration-200 active:scale-95"
             >
               <Icon name="bolt" />
-            </button>
-            <button
-              type="button"
+            </a>
+            <a
+              href="#/analytics"
               aria-label="Analytics"
+              title="Analytics"
               className="p-1 text-text-secondary hover:text-text-primary transition-colors duration-200 active:scale-95"
             >
               <Icon name="query_stats" />
-            </button>
-            <button
-              type="button"
-              aria-label="Sensors"
+            </a>
+            <a
+              href="#/map"
+              aria-label="Map"
+              title="Map"
               className="p-1 text-text-secondary hover:text-text-primary transition-colors duration-200 active:scale-95"
             >
               <Icon name="sensors" />
-            </button>
+            </a>
             {onExit && (
               <button
                 type="button"

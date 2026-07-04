@@ -29,11 +29,18 @@ function Icon({ name }: { name: string }) {
   );
 }
 
+function deviceDisplayName(device: { roomId: string; label: string } | undefined): string {
+  if (!device) return "Work Room 1 - Light 2";
+  return `${device.roomId} - ${device.label}`;
+}
+
 export function DeviceAnalytics({ onExit }: DeviceAnalyticsProps) {
   const { snapshot } = useOfficeSnapshot();
+  const [selectedDeviceId, setSelectedDeviceId] = useState("work1-light-2");
+  const [deviceMenuOpen, setDeviceMenuOpen] = useState(false);
   const selectedDevice = useMemo(
-    () => snapshot?.devices.find((device) => device.id === "work1-light-2") ?? snapshot?.devices[0],
-    [snapshot],
+    () => snapshot?.devices.find((device) => device.id === selectedDeviceId) ?? snapshot?.devices[0],
+    [selectedDeviceId, snapshot],
   );
   const [usage, setUsage] = useState<{
     powerWatts: number;
@@ -98,12 +105,57 @@ export function DeviceAnalytics({ onExit }: DeviceAnalyticsProps) {
       <main className="pt-20 md:pl-64 md:h-screen md:overflow-hidden flex flex-col">
         <div className="flex-1 md:min-h-0 p-4 md:p-8 lg:p-12 flex flex-col gap-8 md:overflow-y-auto custom-scrollbar">
           {/* Header Section */}
-          <section className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-border-subtle pb-4">
+          <section className="flex flex-col gap-4 border-b border-border-subtle pb-4">
             <div>
               <div className="flex items-center gap-3 mb-1">
-                <h1 className="font-headline-md text-headline-md text-text-primary">
-                  {selectedDevice ? `${selectedDevice.roomId} - ${selectedDevice.label}` : "Work Room 1 - Light 2"}
-                </h1>
+                <div className="relative inline-flex items-center">
+                  <button
+                    type="button"
+                    aria-haspopup="listbox"
+                    aria-expanded={deviceMenuOpen}
+                    onClick={() => setDeviceMenuOpen((open) => !open)}
+                    className="inline-flex items-center gap-2 border border-transparent rounded-md py-0 pl-0 pr-1 font-headline-md text-headline-md text-text-primary hover:border-border-subtle focus:border-[#FF9D63] focus:outline-none transition-colors"
+                  >
+                    <span>{deviceDisplayName(selectedDevice)}</span>
+                    <span className="material-symbols-outlined text-[20px] text-text-secondary">
+                      expand_more
+                    </span>
+                  </button>
+                  {deviceMenuOpen && (
+                    <div
+                      role="listbox"
+                      className="absolute left-0 top-full mt-2 z-50 w-72 max-h-72 overflow-y-auto custom-scrollbar rounded-lg border border-border-subtle bg-bg-deep shadow-[0_20px_50px_rgba(0,0,0,0.6)] p-1"
+                    >
+                      {(snapshot?.devices ?? []).map((device) => {
+                        const active = device.id === selectedDevice?.id;
+                        return (
+                          <button
+                            key={device.id}
+                            type="button"
+                            role="option"
+                            aria-selected={active}
+                            onClick={() => {
+                              setSelectedDeviceId(device.id);
+                              setDeviceMenuOpen(false);
+                            }}
+                            className={
+                              active
+                                ? "w-full text-left rounded-md px-3 py-2 bg-surface-panel border border-border-subtle text-text-primary"
+                                : "w-full text-left rounded-md px-3 py-2 text-text-secondary hover:text-text-primary hover:bg-surface-panel transition-colors"
+                            }
+                          >
+                            <span className="block font-body-base text-body-base">
+                              {deviceDisplayName(device)}
+                            </span>
+                            <span className="block font-label-caps text-label-caps uppercase">
+                              {device.id}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
                 <span className="bg-surface-panel text-text-primary border border-border-subtle px-3 py-1 rounded-full font-label-caps text-label-caps flex items-center gap-1">
                   <span className="w-2 h-2 rounded-full bg-[#FF9D63] animate-pulse shadow-[0_0_8px_#FF9D63]" />
                   {(selectedDevice?.state.status ?? "on").toUpperCase()}
@@ -112,12 +164,6 @@ export function DeviceAnalytics({ onExit }: DeviceAnalyticsProps) {
               <p className="font-body-base text-body-base text-text-secondary flex items-center gap-1">
                 <span className="material-symbols-outlined text-[16px]">bolt</span>
                 Current Draw: {usage?.powerWatts ?? selectedDevice?.state.powerWatts ?? 15}W
-              </p>
-            </div>
-            <div className="text-right">
-              <p className="font-body-sm text-body-sm text-text-secondary">Last toggled by</p>
-              <p className="font-body-base text-body-base text-text-primary font-semibold">
-                {selectedDevice?.state.source ?? "Nafisa Rahman"}
               </p>
             </div>
           </section>

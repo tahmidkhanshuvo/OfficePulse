@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { RoomSlug } from "../../../../packages/contracts/src";
+import type { OccupancyState, RoomSlug } from "../../../../packages/contracts/src";
 import { DashboardChrome } from "../components/DashboardChrome";
 import { commandDevice, withControlRetry } from "../lib/api";
 import { useOfficeSnapshot } from "../hooks/useOfficeSnapshot";
@@ -11,22 +11,21 @@ type MapProps = {
 type RoomId = "drawing" | "work1" | "work2";
 
 type LightState = Record<RoomId, boolean[]>;
+type FanState = Record<RoomId, boolean[]>;
 
 const INITIAL_LIGHTS: LightState = {
   drawing: [true, true, true],
   work1: [false, false, false],
   work2: [true, true, true],
 };
+const INITIAL_FANS: FanState = {
+  drawing: [true, true],
+  work1: [false, false],
+  work2: [true, true],
+};
 
 const lightId = (room: RoomId, idx: number) => `${room}-light-${idx + 1}`;
-
-function Icon({ name }: { name: string }) {
-  return (
-    <span className="material-symbols-outlined" data-icon={name}>
-      {name}
-    </span>
-  );
-}
+const fanId = (room: RoomId, idx: number) => `${room}-fan-${idx + 1}`;
 
 function LightDot({
   active,
@@ -62,7 +61,8 @@ function LightDot({
 export function Map({ onExit }: MapProps) {
   const { snapshot, refresh } = useOfficeSnapshot();
   const [lights, setLights] = useState<LightState>(INITIAL_LIGHTS);
-  const [busyLight, setBusyLight] = useState<string | null>(null);
+  const [fans, setFans] = useState<FanState>(INITIAL_FANS);
+  const [busyDevice, setBusyDevice] = useState<string | null>(null);
 
   useEffect(() => {
     if (!snapshot) return;
@@ -71,12 +71,17 @@ export function Map({ onExit }: MapProps) {
       work1: [0, 1, 2].map((idx) => snapshot.devices.find((device) => device.id === lightId("work1", idx))?.state.status === "on"),
       work2: [0, 1, 2].map((idx) => snapshot.devices.find((device) => device.id === lightId("work2", idx))?.state.status === "on"),
     });
+    setFans({
+      drawing: [0, 1].map((idx) => snapshot.devices.find((device) => device.id === fanId("drawing", idx))?.state.status === "on"),
+      work1: [0, 1].map((idx) => snapshot.devices.find((device) => device.id === fanId("work1", idx))?.state.status === "on"),
+      work2: [0, 1].map((idx) => snapshot.devices.find((device) => device.id === fanId("work2", idx))?.state.status === "on"),
+    });
   }, [snapshot]);
 
-  const toggle = async (room: RoomId, idx: number) => {
+  const toggleLight = async (room: RoomId, idx: number) => {
     const deviceId = lightId(room, idx);
     const next = !lights[room][idx];
-    setBusyLight(deviceId);
+    setBusyDevice(deviceId);
     setLights((prev) => ({
       ...prev,
       [room]: prev[room].map((v, i) => (i === idx ? next : v)),
@@ -90,7 +95,28 @@ export function Map({ onExit }: MapProps) {
         [room]: prev[room].map((v, i) => (i === idx ? !next : v)),
       }));
     } finally {
-      setBusyLight(null);
+      setBusyDevice(null);
+    }
+  };
+
+  const toggleFan = async (room: RoomId, idx: number) => {
+    const deviceId = fanId(room, idx);
+    const next = !fans[room][idx];
+    setBusyDevice(deviceId);
+    setFans((prev) => ({
+      ...prev,
+      [room]: prev[room].map((v, i) => (i === idx ? next : v)),
+    }));
+    try {
+      await withControlRetry(() => commandDevice(deviceId, next ? "on" : "off"));
+      await refresh();
+    } catch {
+      setFans((prev) => ({
+        ...prev,
+        [room]: prev[room].map((v, i) => (i === idx ? !next : v)),
+      }));
+    } finally {
+      setBusyDevice(null);
     }
   };
 
@@ -115,6 +141,32 @@ export function Map({ onExit }: MapProps) {
     { id: "work1", label: "Work Room 1", tint: "blue" },
     { id: "work2", label: "Work Room 2", tint: "green" },
   ] as const;
+
+  const occupancyState = (room: RoomId): OccupancyState =>
+    snapshot?.occupancy.find((item) => item.roomId === room)?.state ?? "unknown";
+
+  const isOccupied = (room: RoomId) => {
+    const state = occupancyState(room);
+    return state === "occupied" || state === "recently_active";
+  };
+
+  const occupancyStyle = (room: RoomId) =>
+    isOccupied(room)
+      ? {
+          backgroundColor: "rgba(34, 197, 94, 0.86)",
+          borderColor: "rgba(74, 222, 128, 0.95)",
+          borderStyle: "solid",
+          boxShadow: "0 0 16px rgba(34, 197, 94, 0.65)",
+        }
+      : {
+          backgroundColor: "rgba(255, 255, 255, 0.08)",
+          borderColor: "rgba(255, 255, 255, 0.22)",
+          borderStyle: "solid",
+          boxShadow: "inset 0 0 5px rgba(255, 255, 255, 0.12)",
+        };
+
+  const occupancyLabel = (room: RoomId, label: string) =>
+    `${label} occupancy: ${occupancyState(room).replace("_", " ")}`;
 
   return (
     <DashboardChrome active="map" onExit={onExit}>
@@ -156,7 +208,7 @@ export function Map({ onExit }: MapProps) {
           </header>
 
           {/* Floorplan */}
-          <section className="relative flex items-center justify-center min-h-[440px] py-6 shrink-0">
+          <section className="relative flex items-center justify-center min-h-[440px] py-6 pb-14 shrink-0">
             <div className="relative w-full max-w-[1000px] aspect-[16/10] bg-[#111] border border-outline-variant shadow-2xl rounded-sm">
               {/* External walls */}
               <div className="absolute inset-0 border-4 border-surface-variant pointer-events-none z-30" />
@@ -174,34 +226,40 @@ export function Map({ onExit }: MapProps) {
                 <div className="table-fp w-[40px] h-[60px] left-[50px] top-[40%]" />
                 <div className="chair w-[35px] h-[35px] left-4 bottom-[10%] rounded-sm" />
                 {/* Plants */}
-                <div className="plant left-2 top-2" />
-                <div className="plant right-2 bottom-2" />
+                <div
+                  aria-label={occupancyLabel("drawing", "Drawing Room")}
+                  className="plant left-5 top-12"
+                  role="img"
+                  style={occupancyStyle("drawing")}
+                  title={occupancyLabel("drawing", "Drawing Room")}
+                />
+                <div className="plant right-6 bottom-[9%]" />
                 {/* Devices */}
                 <LightDot
                   active={lights.drawing[0]}
-                  onClick={() => toggle("drawing", 0)}
-                  className={`top-[15%] left-[20%] ${busyLight === lightId("drawing", 0) ? "opacity-50" : ""}`}
+                  onClick={() => toggleLight("drawing", 0)}
+                  className={`top-[15%] left-[20%] ${busyDevice === lightId("drawing", 0) ? "opacity-50" : ""}`}
                 />
                 <LightDot
                   active={lights.drawing[1]}
-                  onClick={() => toggle("drawing", 1)}
-                  className={`top-[15%] right-[20%] ${busyLight === lightId("drawing", 1) ? "opacity-50" : ""}`}
+                  onClick={() => toggleLight("drawing", 1)}
+                  className={`top-[15%] right-[20%] ${busyDevice === lightId("drawing", 1) ? "opacity-50" : ""}`}
                 />
                 {/* Fans */}
-                <div className="absolute top-[15%] left-[50%] -translate-x-1/2 w-8 h-8 flex items-center justify-center z-20">
-                  <span className="material-symbols-outlined text-white spin-slow text-[32px] opacity-80 drop-shadow-md">
+                <button type="button" onClick={() => toggleFan("drawing", 0)} aria-label="Toggle Drawing Room Fan 1" className="absolute top-[15%] left-[50%] -translate-x-1/2 w-8 h-8 flex items-center justify-center z-20 hover:scale-110 transition-transform">
+                  <span className={`material-symbols-outlined text-white text-[32px] drop-shadow-md ${fans.drawing[0] ? "spin-slow opacity-80" : "opacity-30"} ${busyDevice === fanId("drawing", 0) ? "opacity-50" : ""}`}>
                     mode_fan
                   </span>
-                </div>
-                <div className="absolute bottom-[20%] left-[50%] -translate-x-1/2 w-8 h-8 flex items-center justify-center z-20">
-                  <span className="material-symbols-outlined text-white spin-slow text-[32px] opacity-80 drop-shadow-md">
+                </button>
+                <button type="button" onClick={() => toggleFan("drawing", 1)} aria-label="Toggle Drawing Room Fan 2" className="absolute bottom-[20%] left-[50%] -translate-x-1/2 w-8 h-8 flex items-center justify-center z-20 hover:scale-110 transition-transform">
+                  <span className={`material-symbols-outlined text-white text-[32px] drop-shadow-md ${fans.drawing[1] ? "spin-slow opacity-80" : "opacity-30"} ${busyDevice === fanId("drawing", 1) ? "opacity-50" : ""}`}>
                     mode_fan
                   </span>
-                </div>
+                </button>
                 <LightDot
                   active={lights.drawing[2]}
-                  onClick={() => toggle("drawing", 2)}
-                  className={`bottom-[20%] left-[30%] ${busyLight === lightId("drawing", 2) ? "opacity-50" : ""}`}
+                  onClick={() => toggleLight("drawing", 2)}
+                  className={`bottom-[20%] left-[30%] ${busyDevice === lightId("drawing", 2) ? "opacity-50" : ""}`}
                 />
                 {/* Door */}
                 <div className="absolute bottom-[-4px] right-[10%] w-[40px] h-[40px] z-40 bg-[#111]">
@@ -221,7 +279,13 @@ export function Map({ onExit }: MapProps) {
                 <div className="desk top-[25%] left-[10%]">
                   <div className="monitor bottom-2 right-2" />
                   <div className="keyboard bottom-2 left-2" />
-                  <div className="chair top-[110%] left-[30%]" />
+                  <div
+                    aria-label={occupancyLabel("work1", "Work Room 1")}
+                    className="chair top-[110%] left-[30%]"
+                    role="img"
+                    style={occupancyStyle("work1")}
+                    title={occupancyLabel("work1", "Work Room 1")}
+                  />
                 </div>
                 <div className="desk top-[25%] right-[10%]">
                   <div className="monitor bottom-2 left-2" />
@@ -241,28 +305,28 @@ export function Map({ onExit }: MapProps) {
                 {/* Devices */}
                 <LightDot
                   active={lights.work1[0]}
-                  onClick={() => toggle("work1", 0)}
-                  className={`top-[10%] left-[15%] ${busyLight === lightId("work1", 0) ? "opacity-50" : ""}`}
+                  onClick={() => toggleLight("work1", 0)}
+                  className={`top-[10%] left-[15%] ${busyDevice === lightId("work1", 0) ? "opacity-50" : ""}`}
                 />
                 <LightDot
                   active={lights.work1[1]}
-                  onClick={() => toggle("work1", 1)}
-                  className={`top-[10%] right-[15%] ${busyLight === lightId("work1", 1) ? "opacity-50" : ""}`}
+                  onClick={() => toggleLight("work1", 1)}
+                  className={`top-[10%] right-[15%] ${busyDevice === lightId("work1", 1) ? "opacity-50" : ""}`}
                 />
-                <div className="absolute top-[15%] left-[50%] -translate-x-1/2 w-8 h-8 flex items-center justify-center z-20">
-                  <span className="material-symbols-outlined text-white spin-slow text-[32px] opacity-40">
+                <button type="button" onClick={() => toggleFan("work1", 0)} aria-label="Toggle Work Room 1 Fan 1" className="absolute top-[15%] left-[50%] -translate-x-1/2 w-8 h-8 flex items-center justify-center z-20 hover:scale-110 transition-transform">
+                  <span className={`material-symbols-outlined text-white text-[32px] ${fans.work1[0] ? "spin-slow opacity-80" : "opacity-30"} ${busyDevice === fanId("work1", 0) ? "opacity-50" : ""}`}>
                     mode_fan
                   </span>
-                </div>
-                <div className="absolute bottom-[35%] left-[50%] -translate-x-1/2 w-8 h-8 flex items-center justify-center z-20">
-                  <span className="material-symbols-outlined text-white spin-slow text-[32px] opacity-40">
+                </button>
+                <button type="button" onClick={() => toggleFan("work1", 1)} aria-label="Toggle Work Room 1 Fan 2" className="absolute bottom-[35%] left-[50%] -translate-x-1/2 w-8 h-8 flex items-center justify-center z-20 hover:scale-110 transition-transform">
+                  <span className={`material-symbols-outlined text-white text-[32px] ${fans.work1[1] ? "spin-slow opacity-80" : "opacity-30"} ${busyDevice === fanId("work1", 1) ? "opacity-50" : ""}`}>
                     mode_fan
                   </span>
-                </div>
+                </button>
                 <LightDot
                   active={lights.work1[2]}
-                  onClick={() => toggle("work1", 2)}
-                  className={`bottom-[15%] left-[50%] -translate-x-1/2 ${busyLight === lightId("work1", 2) ? "opacity-50" : ""}`}
+                  onClick={() => toggleLight("work1", 2)}
+                  className={`bottom-[15%] left-[50%] -translate-x-1/2 ${busyDevice === lightId("work1", 2) ? "opacity-50" : ""}`}
                 />
                 {/* Door */}
                 <div className="absolute bottom-[-4px] left-[5%] w-[40px] h-[40px] z-40 bg-[#111]">
@@ -283,7 +347,13 @@ export function Map({ onExit }: MapProps) {
                 <div className="desk top-[25%] left-[10%]">
                   <div className="monitor bottom-2 right-2" />
                   <div className="keyboard bottom-2 left-2" />
-                  <div className="chair top-[110%] left-[30%]" />
+                  <div
+                    aria-label={occupancyLabel("work2", "Work Room 2")}
+                    className="chair top-[110%] left-[30%]"
+                    role="img"
+                    style={occupancyStyle("work2")}
+                    title={occupancyLabel("work2", "Work Room 2")}
+                  />
                 </div>
                 <div className="desk top-[25%] right-[10%]">
                   <div className="monitor bottom-2 left-2" />
@@ -303,28 +373,28 @@ export function Map({ onExit }: MapProps) {
                 {/* Devices */}
                 <LightDot
                   active={lights.work2[0]}
-                  onClick={() => toggle("work2", 0)}
-                  className={`top-[10%] left-[15%] ${busyLight === lightId("work2", 0) ? "opacity-50" : ""}`}
+                  onClick={() => toggleLight("work2", 0)}
+                  className={`top-[10%] left-[15%] ${busyDevice === lightId("work2", 0) ? "opacity-50" : ""}`}
                 />
                 <LightDot
                   active={lights.work2[1]}
-                  onClick={() => toggle("work2", 1)}
-                  className={`top-[10%] right-[15%] ${busyLight === lightId("work2", 1) ? "opacity-50" : ""}`}
+                  onClick={() => toggleLight("work2", 1)}
+                  className={`top-[10%] right-[15%] ${busyDevice === lightId("work2", 1) ? "opacity-50" : ""}`}
                 />
-                <div className="absolute top-[15%] left-[50%] -translate-x-1/2 w-8 h-8 flex items-center justify-center z-20">
-                  <span className="material-symbols-outlined text-white spin-slow text-[32px] opacity-80">
+                <button type="button" onClick={() => toggleFan("work2", 0)} aria-label="Toggle Work Room 2 Fan 1" className="absolute top-[15%] left-[50%] -translate-x-1/2 w-8 h-8 flex items-center justify-center z-20 hover:scale-110 transition-transform">
+                  <span className={`material-symbols-outlined text-white text-[32px] ${fans.work2[0] ? "spin-slow opacity-80" : "opacity-30"} ${busyDevice === fanId("work2", 0) ? "opacity-50" : ""}`}>
                     mode_fan
                   </span>
-                </div>
-                <div className="absolute bottom-[35%] left-[50%] -translate-x-1/2 w-8 h-8 flex items-center justify-center z-20">
-                  <span className="material-symbols-outlined text-white spin-slow text-[32px] opacity-80">
+                </button>
+                <button type="button" onClick={() => toggleFan("work2", 1)} aria-label="Toggle Work Room 2 Fan 2" className="absolute bottom-[35%] left-[50%] -translate-x-1/2 w-8 h-8 flex items-center justify-center z-20 hover:scale-110 transition-transform">
+                  <span className={`material-symbols-outlined text-white text-[32px] ${fans.work2[1] ? "spin-slow opacity-80" : "opacity-30"} ${busyDevice === fanId("work2", 1) ? "opacity-50" : ""}`}>
                     mode_fan
                   </span>
-                </div>
+                </button>
                 <LightDot
                   active={lights.work2[2]}
-                  onClick={() => toggle("work2", 2)}
-                  className={`bottom-[15%] left-[50%] -translate-x-1/2 ${busyLight === lightId("work2", 2) ? "opacity-50" : ""}`}
+                  onClick={() => toggleLight("work2", 2)}
+                  className={`bottom-[15%] left-[50%] -translate-x-1/2 ${busyDevice === lightId("work2", 2) ? "opacity-50" : ""}`}
                 />
                 {/* Door */}
                 <div className="absolute bottom-[-4px] left-[5%] w-[40px] h-[40px] z-40 bg-[#111]">
@@ -340,9 +410,13 @@ export function Map({ onExit }: MapProps) {
                   <div className="door-arc top-0 right-0 border-b border-l rounded-bl-full border-white/40" />
                   <div className="door-line top-0 left-0 w-[40px] h-[2px] bg-white/40 transform -rotate-90 origin-top-left" />
                 </div>
-                <div className="absolute -bottom-8 left-1/2 -translate-x-1/2 font-label-caps text-label-caps text-text-secondary flex flex-col items-center">
-                  <Icon name="arrow_upward" />
-                  <span className="text-[10px] mt-1">ENTRY</span>
+                <div className="absolute -bottom-12 left-1/2 -translate-x-1/2 font-label-caps text-label-caps text-text-secondary flex flex-col items-center pointer-events-none">
+                  <span className="material-symbols-outlined text-[16px] leading-none text-[#FF9D63]">
+                    arrow_upward
+                  </span>
+                  <span className="mt-1 rounded bg-black/70 px-2 py-0.5 text-[10px] tracking-normal">
+                    ENTRY
+                  </span>
                 </div>
                 {/* Details */}
                 <div className="plant left-8 top-1/2 -translate-y-1/2" />

@@ -199,6 +199,29 @@ export function reportDownloadUrl(format: "csv" | "pdf") {
   return `${API_BASE_URL}/api/v1/reports/downloads/${format}/latest`;
 }
 
+export async function downloadReport(format: "csv" | "pdf") {
+  const response = await fetch(reportDownloadUrl(format), { credentials: "include" });
+  if (!response.ok) {
+    const text = await response.text();
+    let message = response.statusText;
+    try {
+      message = JSON.parse(text)?.error?.message ?? message;
+    } catch {
+      if (text) message = text;
+    }
+    throw new ApiError(response.status, "REPORT_DOWNLOAD_FAILED", message);
+  }
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `officepulse-report.${format}`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
 export function getSettings() {
   return api<{
     timezone: string;

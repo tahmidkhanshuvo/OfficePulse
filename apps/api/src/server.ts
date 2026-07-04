@@ -572,6 +572,36 @@ async function route(context: RequestContext): Promise<Response> {
     return json(context, { reports: office.getReports() });
   }
 
+  const reportDownloadMatch = path.match(/^\/api\/v1\/reports\/downloads\/(csv|pdf)\/latest$/);
+  if (method === "GET" && reportDownloadMatch) {
+    const current = snapshot(context);
+    if (reportDownloadMatch[1] === "csv") {
+      const lines = [
+        "room_id,room_name,power_watts,active_device_count,alert_count",
+        ...current.rooms.map((room) =>
+          [
+            room.room.slug,
+            room.room.name,
+            room.powerWatts,
+            room.activeDeviceCount,
+            room.alerts.length
+          ].join(",")
+        )
+      ];
+      return fileResponse(context, `${lines.join("\n")}\n`, "text/csv; charset=utf-8", "officepulse-report.csv");
+    }
+
+    const text = [
+      "OfficePulse Report",
+      `Generated At: ${current.generatedAt}`,
+      `Total Power Watts: ${current.energy.totalPowerWatts}`,
+      `Today kWh: ${current.energy.todayKwh}`,
+      `Estimated Cost Today: ${current.energy.estimatedCostToday} ${current.energy.currency}`,
+      `Active Alerts: ${current.alerts.length}`
+    ].join("\n");
+    return fileResponse(context, text, "application/pdf", "officepulse-report.pdf");
+  }
+
   const reportMatch = path.match(/^\/api\/v1\/reports\/([^/]+)$/);
   if (method === "GET" && reportMatch) {
     const report = office.getReports().find((item) => item.id === reportMatch[1]);

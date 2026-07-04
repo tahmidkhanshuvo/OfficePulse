@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { verifyPlatformPin } from "../lib/api";
+import { verifyControlPin, verifyPlatformPin } from "../lib/api";
 
 export function AdminLogin() {
   const [adminId, setAdminId] = useState("");
@@ -14,6 +14,7 @@ export function AdminLogin() {
     setError(null);
     try {
       await verifyPlatformPin(securityKey.trim());
+      await verifyControlPin(securityKey.trim());
       window.location.hash = "#/overview";
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to authenticate.");

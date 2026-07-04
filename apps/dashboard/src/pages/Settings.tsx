@@ -3,10 +3,10 @@ import type { ReportRequest } from "../../../../packages/contracts/src";
 import { DashboardChrome } from "../components/DashboardChrome";
 import {
   createReport,
+  downloadReport,
   getReports,
   getSettings,
   getSystemComponents,
-  reportDownloadUrl,
   withControlRetry,
 } from "../lib/api";
 
@@ -55,6 +55,8 @@ export function Settings({ onExit }: SettingsProps) {
   const [reports, setReports] = useState<ReportRequest[]>([]);
   const [components, setComponents] = useState<Array<{ id: string; status: string; lastSeenAt: string }>>([]);
   const [busyReport, setBusyReport] = useState<"csv" | "pdf" | null>(null);
+  const [busyDownload, setBusyDownload] = useState<"csv" | "pdf" | null>(null);
+  const [reportError, setReportError] = useState<string | null>(null);
 
   useEffect(() => {
     getSettings()
@@ -70,11 +72,26 @@ export function Settings({ onExit }: SettingsProps) {
 
   const handleCreateReport = async (format: "csv" | "pdf") => {
     setBusyReport(format);
+    setReportError(null);
     try {
       const report = await withControlRetry(() => createReport(format));
       setReports((prev) => [report, ...prev.filter((item) => item.id !== report.id)]);
+    } catch (cause) {
+      setReportError(cause instanceof Error ? cause.message : "Unable to create report.");
     } finally {
       setBusyReport(null);
+    }
+  };
+
+  const handleDownloadReport = async (format: "csv" | "pdf") => {
+    setBusyDownload(format);
+    setReportError(null);
+    try {
+      await downloadReport(format);
+    } catch (cause) {
+      setReportError(cause instanceof Error ? cause.message : "Unable to download report.");
+    } finally {
+      setBusyDownload(null);
     }
   };
 
@@ -354,19 +371,12 @@ export function Settings({ onExit }: SettingsProps) {
                     >
                       Create PDF
                     </button>
-                    <a
-                      href={reportDownloadUrl("csv")}
-                      className="font-label-caps text-label-caps uppercase px-4 py-2 rounded-full border border-border-subtle text-text-secondary hover:text-text-primary transition-colors"
-                    >
-                      Download CSV
-                    </a>
-                    <a
-                      href={reportDownloadUrl("pdf")}
-                      className="font-label-caps text-label-caps uppercase px-4 py-2 rounded-full border border-border-subtle text-text-secondary hover:text-text-primary transition-colors"
-                    >
-                      Download PDF
-                    </a>
                   </div>
+                  {reportError && (
+                    <p className="font-body-sm text-body-sm text-[#FF9D63] border border-[#FF9D63]/40 bg-[#FF9D63]/10 rounded-lg px-3 py-2 mb-4">
+                      {reportError}
+                    </p>
+                  )}
                   <div className="flex flex-col gap-3">
                     {reports.length === 0 && (
                       <div className="font-body-sm text-body-sm text-text-secondary border border-border-subtle rounded-lg px-3 py-3">
@@ -383,9 +393,22 @@ export function Settings({ onExit }: SettingsProps) {
                             {report.status} • {new Date(report.requestedAt).toLocaleString()}
                           </div>
                         </div>
-                        <span className="font-label-caps text-label-caps text-[#FF9D63] border border-[#FF9D63]/50 rounded-full px-3 py-1 uppercase">
-                          {report.id.slice(0, 12)}
-                        </span>
+                        <div className="flex items-center gap-3">
+                          <span className="font-label-caps text-label-caps text-[#FF9D63] border border-[#FF9D63]/50 rounded-full px-3 py-1 uppercase">
+                            {report.id.slice(0, 12)}
+                          </span>
+                          <button
+                            type="button"
+                            disabled={busyDownload === report.format}
+                            onClick={() => handleDownloadReport(report.format)}
+                            aria-label={`Download ${report.format.toUpperCase()} report`}
+                            className="h-8 w-8 rounded-full border border-border-subtle text-text-secondary hover:text-[#FF9D63] hover:border-[#FF9D63]/50 flex items-center justify-center transition-colors disabled:opacity-50"
+                          >
+                            <span className="material-symbols-outlined text-[18px]">
+                              download
+                            </span>
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
