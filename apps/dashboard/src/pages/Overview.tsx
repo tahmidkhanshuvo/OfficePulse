@@ -147,7 +147,7 @@ function roomIcon(slug: RoomSlug): string {
 }
 
 function buildRooms(snapshotRooms: OfficeSnapshot["rooms"] | undefined): Room[] {
-  if (!snapshotRooms) return ROOMS;
+  if (!snapshotRooms) return [];
   return snapshotRooms.map((room) => {
     const fansOn = room.devices.filter((device) => device.type === "fan" && device.state.status === "on").length;
     const lightsOn = room.devices.filter((device) => device.type === "light" && device.state.status === "on").length;
@@ -267,7 +267,7 @@ export function Overview({ onExit }: OverviewProps) {
 
   useEffect(() => {
     refreshOverviewData();
-    const timer = window.setInterval(refreshOverviewData, 15000);
+    const timer = window.setInterval(refreshOverviewData, 5000);
     window.addEventListener("focus", refreshOverviewData);
     return () => {
       window.clearInterval(timer);
@@ -354,16 +354,16 @@ export function Overview({ onExit }: OverviewProps) {
                     room.inactive ? "opacity-60" : ""
                   }`}
                 >
-                  <div className="flex justify-between items-start mb-4 relative z-10">
-                    <div className="flex items-center gap-3">
-                      <div className="h-10 w-10 rounded-lg bg-surface-panel flex items-center justify-center border border-border-subtle">
+                  <div className="flex flex-wrap justify-between items-start gap-3 mb-4 relative z-10">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="h-10 w-10 shrink-0 rounded-lg bg-surface-panel flex items-center justify-center border border-border-subtle">
                         <span className="material-symbols-outlined" style={iconStyle(!room.inactive)}>
                           {room.icon}
                         </span>
                       </div>
                       <div>
                         <h3
-                          className={`font-headline-md text-headline-md ${
+                          className={`font-headline-md text-lg leading-snug ${
                             room.inactive ? "text-text-secondary" : "text-text-primary"
                           }`}
                         >
@@ -412,7 +412,7 @@ export function Overview({ onExit }: OverviewProps) {
                         <span className="font-body-sm text-body-sm">{device.label}</span>
                         <PillToggle
                           checked={device.status ? device.status === "on" : device.defaultOn}
-                          disabled={busyId === device.id}
+                          disabled={busyId === device.id || !!snapshotError || !snapshot}
                           onChange={(next) => toggleDevice(device.id, next)}
                           ariaLabel={`${room.name} ${device.label}`}
                         />
@@ -551,7 +551,7 @@ export function Overview({ onExit }: OverviewProps) {
             <div className="flex flex-wrap justify-end gap-3 pt-4 mt-4 border-t border-border-subtle">
               <button
                 type="button"
-                disabled={busyId === "office-shutdown"}
+                disabled={busyId === "office-shutdown" || !!snapshotError || !snapshot}
                 onClick={() => handleOfficeShutdown(false)}
                 className="bg-surface-panel text-[#FF9D63] border border-[#FF9D63] px-3 py-2 rounded text-xs font-label-caps uppercase hover:bg-[#FF9D63]/10 transition-colors disabled:opacity-50"
               >
@@ -559,7 +559,7 @@ export function Overview({ onExit }: OverviewProps) {
               </button>
               <button
                 type="button"
-                disabled={busyId === "office-emergency"}
+                disabled={busyId === "office-emergency" || !!snapshotError || !snapshot}
                 onClick={() => handleOfficeShutdown(true)}
                 className="bg-[#FF9D63] text-black px-3 py-2 rounded text-xs font-label-caps uppercase hover:opacity-90 transition-opacity disabled:opacity-50"
               >

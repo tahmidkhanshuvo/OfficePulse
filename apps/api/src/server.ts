@@ -32,7 +32,14 @@ const office = await createPersistentOfficeRepository({
   snapshotOptions,
   logger
 });
-const telemetryGenerator = new DeviceTelemetryGenerator(office);
+const fakeTelemetryEnabled =
+  Bun.env.ENABLE_FAKE_TELEMETRY === "true" ||
+  (config.nodeEnv !== "production" && Bun.env.ENABLE_FAKE_TELEMETRY !== "false");
+const telemetryGenerator = new DeviceTelemetryGenerator(
+  office,
+  Number(Bun.env.FAKE_DEVICE_INTERVAL_MS ?? 10000),
+  fakeTelemetryEnabled
+);
 telemetryGenerator.warmStartFromCurrentState();
 const sessions = new InMemorySessionStore({
   ttlSeconds: config.platformSessionTtlSeconds,
@@ -209,6 +216,27 @@ function formatRoomName(roomId: string) {
   if (roomId === "work1") return "Work Room 1";
   if (roomId === "work2") return "Work Room 2";
   return roomId;
+}
+
+function fallbackTelemetryPoints(device: ReturnType<typeof snapshot>["devices"][number], limit: number) {
+  const count = Math.max(1, Math.min(limit, 48));
+  const now = Date.now();
+  return Array.from({ length: count }, (_, index) => {
+    const age = count - index - 1;
+    const observedAt = new Date(now - age * 30_000).toISOString();
+    const wave = Math.sin((index + device.id.length) / 3) * 0.08;
+    const powerWatts =
+      device.state.status === "on"
+        ? Number(Math.max(0, device.state.powerWatts * (1 + wave)).toFixed(2))
+        : 0;
+    return {
+      deviceId: device.id,
+      status: device.state.status,
+      powerWatts,
+      source: device.state.source,
+      observedAt
+    };
+  });
 }
 
 async function getCurrentMonthBilling() {
@@ -650,7 +678,7 @@ async function route(context: RequestContext): Promise<Response> {
     if (!device) return error(context, 404, "DEVICE_NOT_FOUND", "Device not found.", { deviceId: deviceTelemetryMatch[1] });
     const limit = Math.min(Math.max(Number(url.searchParams.get("limit") ?? 48), 1), 200);
     const points = await office.getDeviceTelemetry(device.id, limit);
-    return json(context, { deviceId: device.id, points });
+    return json(context, { deviceId: device.id, points: points.length > 0 ? points : fallbackTelemetryPoints(device, limit) });
   }
 
   const deviceHistoryMatch = path.match(/^\/api\/v1\/devices\/([^/]+)\/history$/);

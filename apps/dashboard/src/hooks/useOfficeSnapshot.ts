@@ -16,29 +16,36 @@ function useOfficeSnapshotState(): OfficeSnapshotState {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const hasLoadedSnapshot = useRef(false);
+  const inFlight = useRef<Promise<void> | null>(null);
 
   const refresh = useCallback(async () => {
+    if (inFlight.current) return inFlight.current;
+    const request = (async () => {
     try {
-      setError(null);
       const next = await getBootstrap();
       hasLoadedSnapshot.current = true;
       setSnapshot(next);
+      setError(null);
     } catch (cause) {
-      if (!hasLoadedSnapshot.current) {
-        setError(cause instanceof Error ? cause.message : "Unable to load office data.");
-      }
+      setError(cause instanceof Error ? cause.message : "Unable to load office data.");
     } finally {
       setLoading(false);
     }
+    })();
+    inFlight.current = request;
+    try { await request; } finally { inFlight.current = null; }
   }, []);
 
   useEffect(() => {
     refresh();
-    const timer = window.setInterval(refresh, 2500);
+    const poll = () => { if (!document.hidden) refresh(); };
+    const timer = window.setInterval(poll, 2500);
     window.addEventListener("focus", refresh);
+    document.addEventListener('visibilitychange', poll);
     return () => {
       window.clearInterval(timer);
       window.removeEventListener("focus", refresh);
+      document.removeEventListener('visibilitychange', poll);
     };
   }, [refresh]);
 

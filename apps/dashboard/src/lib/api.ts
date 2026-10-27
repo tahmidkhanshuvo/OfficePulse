@@ -26,12 +26,6 @@ export class ApiError extends Error {
 function defaultBaseUrl(): string {
   const viteUrl = import.meta.env.VITE_API_URL || import.meta.env.VITE_PUBLIC_API_URL;
   if (viteUrl) return String(viteUrl).replace(/\/$/, "");
-  if (
-    typeof window !== "undefined" &&
-    (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
-  ) {
-    return "http://localhost:3000";
-  }
   return "";
 }
 
@@ -39,7 +33,9 @@ export const API_BASE_URL = defaultBaseUrl();
 
 async function readEnvelope<T>(response: Response): Promise<T> {
   const text = await response.text();
-  const parsed = text ? JSON.parse(text) : {};
+  let parsed: Record<string, any>;
+  try { parsed = text ? JSON.parse(text) : {}; }
+  catch { throw new ApiError(response.status || 502, 'INVALID_RESPONSE', 'The server returned an unexpected response. Please try again.'); }
   if (!response.ok) {
     const error = parsed?.error;
     throw new ApiError(
@@ -60,6 +56,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     ...init,
     headers,
     credentials: "include",
+    signal: init.signal || AbortSignal.timeout(90000),
   });
   return readEnvelope<T>(response);
 }

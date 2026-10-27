@@ -23,12 +23,27 @@ export interface RedisHealth {
   error?: string;
 }
 
-export async function checkRedisHealth(redisUrl?: string): Promise<RedisHealth> {
+function withTimeout<T>(operation: Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`Timed out after ${timeoutMs}ms`)), timeoutMs);
+    operation.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (cause) => {
+        clearTimeout(timer);
+        reject(cause);
+      }
+    );
+  });
+}
+
+export async function checkRedisHealth(redisUrl?: string, timeoutMs = 1500): Promise<RedisHealth> {
   if (!redisUrl) return { configured: false, status: "not_configured" };
+  const redis = new Bun.RedisClient(redisUrl);
   try {
-    const redis = new Bun.RedisClient(redisUrl);
-    await redis.send("PING", []);
-    redis.close();
+    await withTimeout(redis.send("PING", []), timeoutMs);
     return { configured: true, status: "ok" };
   } catch (cause) {
     return {
@@ -36,5 +51,7 @@ export async function checkRedisHealth(redisUrl?: string): Promise<RedisHealth> 
       status: "unavailable",
       error: cause instanceof Error ? cause.message : String(cause)
     };
+  } finally {
+    redis.close();
   }
 }

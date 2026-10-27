@@ -128,6 +128,8 @@ export class PersistentOfficeRepository extends InMemoryOfficeRepository {
   private readonly persistence: OfficePersistence;
   private snapshotPersistTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly snapshotPersistIntervalMs = Number(Bun.env.SNAPSHOT_PERSIST_INTERVAL_MS ?? 5000);
+  private readonly telemetryPersistIntervalMs = Number(Bun.env.TELEMETRY_PERSIST_INTERVAL_MS ?? 10000);
+  private readonly lastTelemetryPersistAt = new Map<string, number>();
 
   constructor(persistence: OfficePersistence) {
     super();
@@ -152,7 +154,10 @@ export class PersistentOfficeRepository extends InMemoryOfficeRepository {
   override ingestDeviceTelemetry(events: DeviceTelemetryInput[]) {
     const updated = super.ingestDeviceTelemetry(events);
     if (updated.length > 0) {
-      this.persistence.persistDeviceStates(updated, true);
+      const persistable = this.filterPersistableTelemetry(updated);
+      if (persistable.length > 0) {
+        this.persistence.persistDeviceStates(persistable, true);
+      }
       this.scheduleSnapshotPersist();
     }
     return updated;
@@ -187,6 +192,16 @@ export class PersistentOfficeRepository extends InMemoryOfficeRepository {
 
   async getCurrentMonthRoomEnergy(tariffPerKwh: number) {
     return this.persistence.getCurrentMonthRoomEnergy(tariffPerKwh);
+  }
+
+  private filterPersistableTelemetry(states: DeviceState[]) {
+    const now = Date.now();
+    return states.filter((state) => {
+      const previous = this.lastTelemetryPersistAt.get(state.deviceId) ?? 0;
+      if (now - previous < this.telemetryPersistIntervalMs) return false;
+      this.lastTelemetryPersistAt.set(state.deviceId, now);
+      return true;
+    });
   }
 
   private scheduleSnapshotPersist() {

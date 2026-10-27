@@ -62,7 +62,7 @@ export function DashboardChrome({
   topNavCenter,
   children,
 }: DashboardChromeProps) {
-  const { snapshot } = useOfficeSnapshot();
+  const { snapshot, error: connectionError, refresh } = useOfficeSnapshot();
   const [alertsOpen, setAlertsOpen] = useState(false);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const activeAlerts = alerts.filter((alert) => alert.status === "active");
@@ -74,7 +74,7 @@ export function DashboardChrome({
         .catch(() => setAlerts([]));
     };
     refreshAlerts();
-    const timer = window.setInterval(refreshAlerts, 15000);
+    const timer = window.setInterval(refreshAlerts, 5000);
     window.addEventListener("focus", refreshAlerts);
     return () => {
       window.clearInterval(timer);
@@ -99,9 +99,9 @@ export function DashboardChrome({
   const center =
     topNavCenter ?? (
       <>
-        <MetricChip label="Total Office Power" value={snapshot ? formatWatts(snapshot.energy.totalPowerWatts) : "450W"} />
+        <MetricChip label="Total Office Power" value={snapshot ? formatWatts(snapshot.energy.totalPowerWatts) : "—"} />
         <div className="h-8 w-px bg-border-subtle" />
-        <MetricChip label="Today" value={snapshot ? formatKwh(snapshot.energy.todayKwh) : "12.4 kWh"} />
+        <MetricChip label="Today" value={snapshot ? formatKwh(snapshot.energy.todayKwh) : "—"} />
       </>
     );
 
@@ -127,7 +127,7 @@ export function DashboardChrome({
           <div className="hidden sm:flex items-center gap-1 px-3 py-1 bg-surface-panel rounded-full border border-border-subtle">
             <span className="h-2 w-2 rounded-full bg-white animate-pulse" />
             <span className="font-label-caps text-label-caps text-text-secondary uppercase">
-              ONLINE
+              {connectionError ? 'Disconnected' : snapshot ? 'Connected' : 'Connecting'}
             </span>
           </div>
           <div className="relative flex gap-3">
@@ -251,6 +251,7 @@ export function DashboardChrome({
       </nav>
 
       {/* SideNav (Desktop) */}
+      {connectionError && <div role="alert" className="fixed left-0 right-0 top-20 z-50 flex flex-wrap items-center justify-center gap-3 border-b border-orange-300/30 bg-[#34271d] px-4 py-3 text-sm text-orange-100"><span>Connection interrupted. {snapshot ? 'Showing the last received data.' : 'Waiting for office data.'}</span><button onClick={() => refresh()} className="rounded border border-orange-200/50 px-3 py-1">Retry connection</button></div>}
       <aside className="fixed left-0 top-20 h-[calc(100vh-80px)] z-40 hidden md:flex flex-col py-4 bg-surface-panel border-r border-border-subtle w-64">
         <div className="px-4 mb-8">
           <div className="flex items-center gap-3 mb-1">

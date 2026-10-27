@@ -12,10 +12,12 @@ export class DeviceTelemetryGenerator {
 
   constructor(
     private readonly repository: OfficeRepository,
-    private readonly intervalMs = Number(Bun.env.FAKE_DEVICE_INTERVAL_MS ?? 2500)
+    private readonly intervalMs = Number(Bun.env.FAKE_DEVICE_INTERVAL_MS ?? 10000),
+    private readonly enabled = true
   ) {}
 
   syncDevice(deviceId: string, status: Extract<DeviceStatus, "on" | "off">) {
+    if (!this.enabled) return;
     if (status === "on") {
       this.start(deviceId);
     } else {
@@ -45,6 +47,7 @@ export class DeviceTelemetryGenerator {
   }
 
   warmStartFromCurrentState() {
+    if (!this.enabled) return;
     for (const state of this.repository.getDeviceStates()) {
       if (state.status === "on") this.start(state.deviceId);
     }
