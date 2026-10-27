@@ -1,6 +1,6 @@
 # OfficePulse · Office energy, in focus
 
-[Live application](https://officepulse.onrender.com) · [Deployment guide](docs/render-deployment.md) · [Architecture decisions](docs/adr)
+[Live application](https://officepulse.tahmidkhan.com.bd) · [Render endpoint](https://officepulse.onrender.com) · [Deployment guide](docs/render-deployment.md) · [Architecture decisions](docs/adr)
 
 ![OfficePulse dashboard running with local simulated telemetry](docs/screenshots/dashboard.jpg)
 

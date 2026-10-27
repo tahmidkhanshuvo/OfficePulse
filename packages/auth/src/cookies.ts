@@ -14,9 +14,9 @@ export function parseCookies(header: string | null): Map<string, string> {
 }
 
 export function createSessionCookie(token: string, maxAgeSeconds: number): string {
-  return `${PLATFORM_SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; Max-Age=${maxAgeSeconds}; HttpOnly; SameSite=Lax`;
+  return `${PLATFORM_SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; Max-Age=${maxAgeSeconds}; HttpOnly; SameSite=Lax${Bun.env.NODE_ENV === 'production' ? '; Secure' : ''}`;
 }
 
 export function clearSessionCookie(): string {
-  return `${PLATFORM_SESSION_COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax`;
+  return `${PLATFORM_SESSION_COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax${Bun.env.NODE_ENV === 'production' ? '; Secure' : ''}`;
 }

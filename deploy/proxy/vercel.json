@@ -5,6 +5,7 @@
   "installCommand": "",
   "outputDirectory": "public",
   "rewrites": [
+    { "source": "/", "destination": "https://officepulse.onrender.com/index.html" },
     { "source": "/:path*", "destination": "https://officepulse.onrender.com/:path*" }
   ],
   "headers": [
