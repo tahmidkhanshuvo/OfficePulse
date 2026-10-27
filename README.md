@@ -2,9 +2,9 @@
 
 [Live application](https://officepulse.tahmidkhan.com.bd) · [Render endpoint](https://officepulse.onrender.com) · [Deployment guide](docs/render-deployment.md) · [Architecture decisions](docs/adr)
 
-![OfficePulse dashboard running with local simulated telemetry](docs/screenshots/dashboard.jpg)
+![OfficePulse live dashboard with simulated telemetry](docs/screenshots/live.jpg)
 
-A protected operations dashboard for room activity, device controls, energy consumption, estimated bills, alerts and simulations. The screenshot uses the local simulator. The hosted application requires the owner's administrator PIN; production credentials are never published here. A Render free service can take time to wake after inactivity.
+A protected operations dashboard for room activity, device controls, energy consumption, estimated bills, alerts and simulations. The screenshot was captured from the deployed application using simulated telemetry. The hosted application requires the owner's administrator PIN; production credentials are never published here. A Render free service can take time to wake after inactivity.
 
 ## Features
 
@@ -87,3 +87,4 @@ The existing Render service builds `Dockerfile` on a free instance. `render.yaml
 `deploy/proxy` provides an optional Vercel external rewrite for a custom domain when Render's free workspace domain allocation is full. Import this directory with the Other preset; it proxies the existing Render application without duplicating the database. Add the new public origin to Render's `CORS_ORIGINS`, attach the domain in Vercel, and use Vercel's exact DNS target in Cloudflare. HTTP polling continues through this proxy; direct WebSocket consumers should use the Render endpoint.
 
 Roll back an application release using the previous successful Render deployment. Container rollback does not reverse database migrations; keep schema changes backward-compatible. Free web instances sleep after inactivity and use ephemeral local storage, so use Neon/Redis for persistent cloud data.
+
