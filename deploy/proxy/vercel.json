@@ -1,0 +1,13 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "buildCommand": "",
+  "installCommand": "",
+  "outputDirectory": "public",
+  "rewrites": [
+    { "source": "/:path*", "destination": "https://officepulse.onrender.com/:path*" }
+  ],
+  "headers": [
+    { "source": "/api/:path*", "headers": [ { "key": "Cache-Control", "value": "private, no-store" } ] }
+  ]
+}

@@ -82,6 +82,8 @@ Contract tests cover PIN handling, sessions, telemetry, alert lifecycle, shutdow
 
 ## Deployment and rollback
 
-The existing Render service builds `Dockerfile` on a free instance. `render.yaml` lists environment settings. Configure secrets in Render, deploy the intended Git branch, and verify health, PIN login, telemetry and a simulator control. Attach a custom domain in Render before adding its exact DNS target at Cloudflare.
+The existing Render service builds `Dockerfile` on a free instance. `render.yaml` lists environment settings. Configure secrets in Render, deploy the intended Git branch, and verify health, PIN login, telemetry and a simulator control.
+
+`deploy/proxy` provides an optional Vercel external rewrite for a custom domain when Render's free workspace domain allocation is full. Import this directory with the Other preset; it proxies the existing Render application without duplicating the database. Add the new public origin to Render's `CORS_ORIGINS`, attach the domain in Vercel, and use Vercel's exact DNS target in Cloudflare. HTTP polling continues through this proxy; direct WebSocket consumers should use the Render endpoint.
 
 Roll back an application release using the previous successful Render deployment. Container rollback does not reverse database migrations; keep schema changes backward-compatible. Free web instances sleep after inactivity and use ephemeral local storage, so use Neon/Redis for persistent cloud data.
