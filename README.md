@@ -14,7 +14,7 @@ A protected operations dashboard for room activity, device controls, energy cons
 - Handle alerts and reports; optionally integrate Discord and an assistant provider.
 - Share one dashboard snapshot, pause polling in hidden tabs, prevent overlapping requests, and retry visibly after a connection failure. Controls disable while data is unavailable.
 
-Simulated readings do not represent a physical meter. Bills and carbon figures are estimates using the configured tariff and telemetry.
+For a hosted demo, set `ENABLE_FAKE_TELEMETRY=true` to keep enabled devices producing simulated readings. The dashboard and PDF identify simulated telemetry explicitly. Leave this flag false for a physical office. Simulated readings do not represent a physical meter. Bills and carbon figures are estimates using the configured tariff and telemetry.
 
 OfficePulse is a real-time office energy monitoring system for 15 devices across three rooms, built around a shared Bun backend, Neon Postgres, Redis, Discord integration, simulator telemetry, a React dashboard, and a 6-digit platform PIN gate.
 
@@ -87,4 +87,15 @@ The existing Render service builds `Dockerfile` on a free instance. `render.yaml
 `deploy/proxy` provides an optional Vercel external rewrite for a custom domain when Render's free workspace domain allocation is full. Import this directory with the Other preset; it proxies the existing Render application without duplicating the database. Add the new public origin to Render's `CORS_ORIGINS`, attach the domain in Vercel, and use Vercel's exact DNS target in Cloudflare. HTTP polling continues through this proxy; direct WebSocket consumers should use the Render endpoint.
 
 Roll back an application release using the previous successful Render deployment. Container rollback does not reverse database migrations; keep schema changes backward-compatible. Free web instances sleep after inactivity and use ephemeral local storage, so use Neon/Redis for persistent cloud data.
+
+
+## PDF export
+
+Settings downloads a genuine one-page PDF containing the current snapshot, room power, active-device counts, alerts and clearly labelled energy/cost estimates. It uses the same values as the dashboard. The report is not a billing statement.
+
+<details><summary>Preview the report layout with sample telemetry</summary>
+
+![OfficePulse report preview](docs/screenshots/report.png)
+
+</details>
 

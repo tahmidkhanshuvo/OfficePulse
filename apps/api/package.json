@@ -5,6 +5,8 @@
   "scripts": {
     "dev": "bun --watch src/server.ts",
     "build": "bun build src/server.ts --outdir dist --target bun"
+  },
+  "dependencies": {
+    "pdf-lib": "^1.17.1"
   }
 }
-

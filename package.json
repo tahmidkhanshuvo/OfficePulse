@@ -23,8 +23,9 @@
     "openapi:generate": "bun scripts/generate-openapi.ts"
   },
   "devDependencies": {
-    "@types/bun": "latest",
     "@biomejs/biome": "latest",
+    "@types/bun": "latest",
+    "pdf-lib": "1.17.1",
     "typescript": "latest"
   }
 }

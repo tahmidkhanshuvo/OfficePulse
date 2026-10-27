@@ -119,6 +119,7 @@ export interface RoomSummary {
 }
 
 export interface OfficeSnapshot {
+  telemetryMode?: "simulated" | "external";
   rooms: RoomSummary[];
   devices: Array<Device & { state: DeviceState }>;
   occupancy: OccupancySnapshot[];

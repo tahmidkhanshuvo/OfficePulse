@@ -14,6 +14,7 @@ import { buildOfficeSnapshot, buildUsageRankings } from "../../../packages/domai
 import { createLogger } from "../../../packages/logger/src";
 import { checkRedisHealth } from "../../../packages/redis/src";
 import { DeviceTelemetryGenerator } from "./device-telemetry-generator";
+import { createOfficeReportPdf } from "./report-pdf";
 
 const dashboardDist = new URL("../../dashboard/dist/", import.meta.url);
 const config = loadConfig();
@@ -122,7 +123,7 @@ function error(
   });
 }
 
-function fileResponse(context: RequestContext, body: string, contentType: string, filename: string): Response {
+function fileResponse(context: RequestContext, body: string | ArrayBuffer, contentType: string, filename: string): Response {
   return new Response(body, {
     headers: withCors(context.request, {
       "content-type": contentType,
@@ -177,11 +178,11 @@ async function serveDashboard(request: Request): Promise<Response> {
 }
 
 function snapshot(context: RequestContext) {
-  return buildOfficeSnapshot(office, {
+  return { ...buildOfficeSnapshot(office, {
     ...snapshotOptions,
     platformAuthenticated: Boolean(context.session),
     controlAuthorized: context.controlAuthorized
-  });
+  }), telemetryMode: fakeTelemetryEnabled ? "simulated" as const : "external" as const };
 }
 
 async function readJson(request: Request): Promise<Record<string, unknown>> {
@@ -925,15 +926,7 @@ async function route(context: RequestContext): Promise<Response> {
       return fileResponse(context, `${lines.join("\n")}\n`, "text/csv; charset=utf-8", "officepulse-report.csv");
     }
 
-    const text = [
-      "OfficePulse Report",
-      `Generated At: ${current.generatedAt}`,
-      `Total Power Watts: ${current.energy.totalPowerWatts}`,
-      `Today kWh: ${current.energy.todayKwh}`,
-      `Estimated Cost Today: ${current.energy.estimatedCostToday} ${current.energy.currency}`,
-      `Active Alerts: ${current.alerts.length}`
-    ].join("\n");
-    return fileResponse(context, text, "application/pdf", "officepulse-report.pdf");
+    return fileResponse(context, await createOfficeReportPdf(current), "application/pdf", "officepulse-report.pdf");
   }
 
   const reportMatch = path.match(/^\/api\/v1\/reports\/([^/]+)$/);

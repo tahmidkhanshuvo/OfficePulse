@@ -117,7 +117,7 @@ export function DashboardChrome({
             <BrandMark className="h-10 w-auto select-none" width={160} height={110} />
           </a>
           <span className="hidden md:inline-flex font-label-caps text-label-caps text-text-secondary uppercase border border-border-subtle bg-surface-panel rounded-full px-2 py-0.5">
-            Admin Console
+            {snapshot?.telemetryMode === "simulated" ? "Simulated telemetry" : "Admin Console"}
           </span>
         </div>
 
