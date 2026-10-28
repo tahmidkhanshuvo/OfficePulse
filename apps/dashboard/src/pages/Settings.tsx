@@ -70,6 +70,18 @@ export function Settings({ onExit }: SettingsProps) {
     }
   };
 
+  const handleDownloadSnapshot = async (format: "csv" | "pdf") => {
+    setBusyDownload(format);
+    setMessage(null);
+    try {
+      await downloadReport(format);
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : "Unable to download snapshot.");
+    } finally {
+      setBusyDownload(null);
+    }
+  };
+
   return (
     <DashboardChrome active="settings" onExit={onExit}>
       <main className="pt-20 md:pl-64 md:h-screen md:overflow-hidden flex flex-col">
@@ -120,13 +132,13 @@ export function Settings({ onExit }: SettingsProps) {
               action={
                 <div className="flex gap-2">
                   <ActionButton
-                    label="CSV"
+                    label="Create CSV"
                     icon="table_view"
                     busy={busyReport === "csv"}
                     onClick={() => handleCreateReport("csv")}
                   />
                   <ActionButton
-                    label="PDF"
+                    label="Create PDF"
                     icon="picture_as_pdf"
                     variant="outline"
                     busy={busyReport === "pdf"}
@@ -136,6 +148,11 @@ export function Settings({ onExit }: SettingsProps) {
               }
             >
               <div className="flex flex-col gap-2">
+                <p className="text-sm text-text-secondary">Download the current snapshot without creating a stored report.</p>
+                <div className="mb-3 flex flex-wrap gap-3">
+                  <ActionButton label="Download current CSV" icon="download" busy={busyDownload === "csv"} onClick={() => handleDownloadSnapshot("csv")} />
+                  <ActionButton label="Download current PDF" icon="picture_as_pdf" variant="outline" busy={busyDownload === "pdf"} onClick={() => handleDownloadSnapshot("pdf")} />
+                </div>
                 {reports.length === 0 && (
                   <EmptyState text="No generated reports yet." />
                 )}

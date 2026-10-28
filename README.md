@@ -12,6 +12,8 @@ A protected operations dashboard for room activity, device controls, energy cons
 - Explore an interactive floor map, device analytics, activity logs and energy estimates.
 - Operate device and office shutdown controls with recent PIN re-verification.
 - Handle alerts and reports; optionally integrate Discord and an assistant provider.
+- Download the current snapshot as CSV or a valid PDF directly from Settings. Stored report creation remains available separately.
+- Confirm protected actions in a masked six-digit PIN dialog with keyboard and cancel support.
 - Share one dashboard snapshot, pause polling in hidden tabs, prevent overlapping requests, and retry visibly after a connection failure. Controls disable while data is unavailable.
 
 For a hosted demo, set `ENABLE_FAKE_TELEMETRY=true` to keep enabled devices producing simulated readings. The dashboard and PDF identify simulated telemetry explicitly. Leave this flag false for a physical office. Simulated readings do not represent a physical meter. Bills and carbon figures are estimates using the configured tariff and telemetry.

@@ -314,7 +314,8 @@ export async function withControlRetry<T>(operation: () => Promise<T>): Promise<
     if (!(error instanceof ApiError) || error.code !== "CONTROL_AUTH_REQUIRED") {
       throw error;
     }
-    const pin = window.prompt("Re-enter the platform PIN to confirm this control action.");
+    const { requestControlPin } = await import("./control-pin-dialog");
+    const pin = await requestControlPin();
     if (!pin) throw error;
     await verifyControlPin(pin);
     return operation();
