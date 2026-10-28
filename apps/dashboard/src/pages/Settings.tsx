@@ -148,7 +148,7 @@ export function Settings({ onExit }: SettingsProps) {
               }
             >
               <div className="flex flex-col gap-2">
-                <p className="text-sm text-text-secondary">Download the current snapshot without creating a stored report.</p>
+                <p className="text-sm text-text-secondary">Downloads use the current snapshot. Report records track creation times; historical readings are not archived here.</p>
                 <div className="mb-3 flex flex-wrap gap-3">
                   <ActionButton label="Download current CSV" icon="download" busy={busyDownload === "csv"} onClick={() => handleDownloadSnapshot("csv")} />
                   <ActionButton label="Download current PDF" icon="picture_as_pdf" variant="outline" busy={busyDownload === "pdf"} onClick={() => handleDownloadSnapshot("pdf")} />

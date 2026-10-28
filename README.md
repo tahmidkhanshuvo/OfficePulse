@@ -22,6 +22,8 @@ OfficePulse is a real-time office energy monitoring system for 15 devices across
 
 The repository includes architecture decisions, API collections, WebSocket events, hardware notes and deployment instructions in `docs/`.
 
+Report records track generation requests and link to the current snapshot download. They do not archive historical PDF/CSV contents. Sessions expire after inactivity or a server restart; the dashboard returns to sign-in when a protected API reports an expired session.
+
 ## Repository Layout
 
 - `apps/dashboard` - React + Vite PWA dashboard.

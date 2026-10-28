@@ -38,6 +38,9 @@ async function readEnvelope<T>(response: Response): Promise<T> {
   catch { throw new ApiError(response.status || 502, 'INVALID_RESPONSE', 'The server returned an unexpected response. Please try again.'); }
   if (!response.ok) {
     const error = parsed?.error;
+    if (response.status === 401 && error?.code === "PLATFORM_AUTH_REQUIRED") {
+      window.location.hash = "#/login";
+    }
     throw new ApiError(
       response.status,
       typeof error?.code === "string" ? error.code : "REQUEST_FAILED",
@@ -242,12 +245,10 @@ function reportDownloadUrl(format: "csv" | "pdf") {
   return `${API_BASE_URL}/api/v1/reports/downloads/${format}/latest`;
 }
 
-function reportDownloadByIdUrl(reportId: string) {
-  return `${API_BASE_URL}/api/v1/reports/${encodeURIComponent(reportId)}/download`;
-}
-
 export async function downloadReport(format: "csv" | "pdf", reportId?: string) {
-  const response = await fetch(reportId ? reportDownloadByIdUrl(reportId) : reportDownloadUrl(format), { credentials: "include" });
+  // Existing report records advertise current-snapshot downloads; no archived file
+  // exists at /reports/:id/download. Keep this aligned with that API contract.
+  const response = await fetch(reportDownloadUrl(format), { credentials: "include" });
   if (!response.ok) {
     const text = await response.text();
     let message = response.statusText;
