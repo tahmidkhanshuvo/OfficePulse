@@ -24,6 +24,12 @@ The repository includes architecture decisions, API collections, WebSocket event
 
 Report records track generation requests and link to the current snapshot download. They do not archive historical PDF/CSV contents. Sessions expire after inactivity or a server restart; the dashboard returns to sign-in when a protected API reports an expired session.
 
+<details><summary>Settings, direct report downloads and live system health</summary>
+
+![Deployed settings and system health](docs/screenshots/settings.jpg)
+
+</details>
+
 ## Repository Layout
 
 - `apps/dashboard` - React + Vite PWA dashboard.
